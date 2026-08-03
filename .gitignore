@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Secrets. Never commit a monday.com token.
+.env
+.env.*
+!.env.example
+*.token
+.monday-token
+
+.DS_Store
+.vscode/
+.idea/
