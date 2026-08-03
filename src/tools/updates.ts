@@ -12,7 +12,10 @@ export function registerUpdateTools({ server, client, schemas }: ToolContext): v
         "Returns the updates, which monday.com calls the item conversation, " +
         "newest first, with their replies.",
       inputSchema: {
-        item_id: z.string().describe("The numeric item id, as a string."),
+        item_id: z
+          .union([z.string(), z.number()])
+          .transform(String)
+          .describe("The numeric item id."),
         limit: z.number().int().min(1).max(100).optional().describe("Default 25."),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
@@ -45,7 +48,10 @@ export function registerUpdateTools({ server, client, schemas }: ToolContext): v
         "Adds an update to the item conversation. The body accepts simple HTML, " +
         "such as <p> and <b>. Everyone who follows the item gets a notification.",
       inputSchema: {
-        item_id: z.string().describe("The numeric item id, as a string."),
+        item_id: z
+          .union([z.string(), z.number()])
+          .transform(String)
+          .describe("The numeric item id."),
         body: z.string().min(1).describe("The update text. Simple HTML is allowed."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },

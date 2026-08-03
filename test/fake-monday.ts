@@ -80,6 +80,8 @@ export class FakeMonday {
   readonly calls: RecordedCall[] = [];
   /** Set to make the next call answer with this error message. */
   nextError: string | undefined;
+  /** Set to make one named operation fail, leaving the others alone. */
+  errorOnOperation: { operation: string; message: string } | undefined;
 
   readonly fetch: typeof fetch = (async (_url: string, init: RequestInit) => {
     const body = JSON.parse(String(init.body)) as {
@@ -89,8 +91,11 @@ export class FakeMonday {
     const operation = /(?:query|mutation)\s+(\w+)/.exec(body.query)?.[1] ?? "anonymous";
     this.calls.push({ operation, query: body.query, variables: body.variables });
 
-    if (this.nextError) {
-      const message = this.nextError;
+    const targeted =
+      this.errorOnOperation?.operation === operation ? this.errorOnOperation.message : undefined;
+
+    if (this.nextError || targeted) {
+      const message = targeted ?? (this.nextError as string);
       this.nextError = undefined;
       return new Response(JSON.stringify({ errors: [{ message }] }), {
         status: 200,
@@ -109,7 +114,7 @@ export class FakeMonday {
     return [...this.calls].reverse().find((call) => call.operation === operation);
   }
 
-  private answer(operation: string, variables: Record<string, unknown>): unknown {
+  private answer(operation: string, vars: Record<string, unknown>): unknown {
     switch (operation) {
       case "Me":
         return {
@@ -130,10 +135,19 @@ export class FakeMonday {
         return { boards: [{ id: "111", name: "Roadmap", items_page: { cursor: "c1", items: [ITEM] } }] };
       case "NextItemsPage":
         return { next_items_page: { cursor: null, items: [ITEM] } };
-      case "GetItems":
-        return { items: [ITEM] };
+      case "GetItems": {
+        const ids = (vars.ids as string[]) ?? [];
+        const limit = Number(vars.limit ?? 25);
+        // Mirror monday.com: unknown ids simply do not come back.
+        const known = ids.filter((id) => id !== "999");
+        return {
+          items: known
+            .slice(0, limit)
+            .map((id) => ({ ...ITEM, id, name: `${ITEM.name} ${id}` })),
+        };
+      }
       case "GetItemBoards":
-        return { items: [{ id: String(variables.ids), board: { id: "111" } }] };
+        return { items: [{ id: String(vars.ids), board: { id: "111" } }] };
       case "GetItemUpdates":
         return {
           items: [
@@ -166,7 +180,7 @@ export class FakeMonday {
         return {
           create_item: {
             id: "556",
-            name: String(variables.itemName),
+            name: String(vars.itemName),
             url: "https://example.monday.com/boards/111/pulses/556",
             group: { id: "topics", title: "This month" },
           },
@@ -175,14 +189,14 @@ export class FakeMonday {
         return {
           create_subitem: {
             id: "600",
-            name: String(variables.itemName),
+            name: String(vars.itemName),
             board: { id: "222", name: "Subitems of Roadmap" },
           },
         };
       case "ChangeColumnValues":
         return { change_multiple_column_values: ITEM };
       case "ChangeItemName":
-        return { change_simple_column_value: { id: "555", name: String(variables.value) } };
+        return { change_simple_column_value: { id: "555", name: String(vars.value) } };
       case "MoveItemToGroup":
         return { move_item_to_group: { id: "555", name: ITEM.name, group: { id: "group_two", title: "Later" } } };
       case "ArchiveItem":

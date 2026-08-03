@@ -48,26 +48,63 @@ export function registerAccountTools({ server, client, config }: ToolContext): v
           .optional()
           .describe("Which class of user to return. The default is all."),
         limit: z.number().int().min(1).max(500).optional().describe("Default 100."),
+        page: z.number().int().min(1).optional().describe("1 based page number. Default 1."),
+        all_pages: z
+          .boolean()
+          .optional()
+          .describe(
+            "True walks every page until the name matches or the list ends. " +
+              "Use it when searching a large account.",
+          ),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ name, kind, limit }) =>
+    async ({ name, kind, limit, page, all_pages }) =>
       guard(async () => {
-        const data = await client.query<{ users: Record<string, unknown>[] }>(
-          LIST_USERS,
-          { limit: limit ?? 100, ids: null, kind: kind === "all" ? null : (kind ?? null) },
-          { label: "monday_list_users" },
-        );
-        const users = data.users ?? [];
-        if (!name) return ok(users);
-        const wanted = name.toLowerCase();
-        return ok(
-          users.filter((user) =>
-            [user.name, user.email]
-              .map((field) => String(field ?? "").toLowerCase())
-              .some((field) => field.includes(wanted)),
-          ),
-        );
+        const pageSize = limit ?? 100;
+        const wanted = name?.toLowerCase();
+        const matches = (user: Record<string, unknown>): boolean =>
+          !wanted ||
+          [user.name, user.email]
+            .map((field) => String(field ?? "").toLowerCase())
+            .some((field) => field.includes(wanted));
+
+        let pageNumber = page ?? 1;
+        const collected: Record<string, unknown>[] = [];
+        let scanned = 0;
+        let lastPageSize = 0;
+
+        // A name search filters client side, so stopping at page one would
+        // hide everyone past the first 100 users.
+        const walk = all_pages === true && wanted !== undefined;
+        do {
+          const data = await client.query<{ users: Record<string, unknown>[] }>(
+            LIST_USERS,
+            {
+              limit: pageSize,
+              page: pageNumber,
+              ids: null,
+              kind: kind === "all" ? null : (kind ?? null),
+            },
+            { label: "monday_list_users" },
+          );
+          const users = data.users ?? [];
+          lastPageSize = users.length;
+          scanned += users.length;
+          collected.push(...users.filter(matches));
+          pageNumber += 1;
+        } while (walk && collected.length === 0 && lastPageSize === pageSize);
+
+        const hasMore = lastPageSize === pageSize;
+        return ok({
+          count: collected.length,
+          scanned,
+          has_more: hasMore,
+          ...(hasMore && collected.length === 0 && wanted
+            ? { next: "No match yet. Call again with all_pages true, or advance page." }
+            : {}),
+          users: collected,
+        });
       }),
   );
 

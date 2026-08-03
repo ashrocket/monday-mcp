@@ -21,7 +21,11 @@ export interface Config {
 }
 
 export const DEFAULT_API_URL = "https://api.monday.com/v2";
-export const DEFAULT_API_VERSION = "2024-10";
+// monday.com retires a version every quarter. A deprecated version is
+// silently served as the maintenance version, so an out-of-date pin here
+// means the code targets one API and talks to another. Check
+// https://developer.monday.com/api-reference/docs/api-versioning
+export const DEFAULT_API_VERSION = "2026-07";
 
 /** Thrown when the server cannot start. The message goes to stderr. */
 export class ConfigError extends Error {
@@ -30,9 +34,12 @@ export class ConfigError extends Error {
 
 /** Reads a token from a file and strips whitespace. */
 function readTokenFile(path: string): string {
-  const expanded = path.startsWith("~/")
-    ? resolve(homedir(), path.slice(2))
-    : path;
+  const expanded =
+    path === "~"
+      ? homedir()
+      : path.startsWith("~/")
+        ? resolve(homedir(), path.slice(2))
+        : path;
   try {
     return readFileSync(expanded, "utf8").trim();
   } catch (error) {
@@ -57,10 +64,14 @@ function parseBool(raw: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
 }
 
-function parseInteger(raw: string | undefined, fallback: number): number {
-  if (!raw) return fallback;
+function parseInteger(
+  raw: string | undefined,
+  fallback: number,
+  minimum = 1,
+): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
   const value = Number.parseInt(raw, 10);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
+  return Number.isFinite(value) && value >= minimum ? value : fallback;
 }
 
 export interface CliOptions {
@@ -158,6 +169,6 @@ export function loadConfig(
     readOnly: options.readOnly ?? parseBool(env.MONDAY_READ_ONLY),
     allowedBoards: parseBoards(options.allowedBoards ?? env.MONDAY_ALLOWED_BOARDS),
     timeoutMs: parseInteger(env.MONDAY_TIMEOUT_MS, 30_000),
-    maxRetries: parseInteger(env.MONDAY_MAX_RETRIES, 3),
+    maxRetries: parseInteger(env.MONDAY_MAX_RETRIES, 3, 0),
   };
 }

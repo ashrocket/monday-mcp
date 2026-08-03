@@ -67,10 +67,20 @@ describe("loadConfig", () => {
     expect(loadConfig([], { MONDAY_API_TOKEN: "t" }).readOnly).toBe(false);
   });
 
+  it("treats MONDAY_MAX_RETRIES=0 as a real choice, not a missing value", () => {
+    expect(loadConfig([], { MONDAY_API_TOKEN: "t", MONDAY_MAX_RETRIES: "0" }).maxRetries).toBe(0);
+  });
+
+  it("expands a bare tilde in a token file path", () => {
+    expect(() => loadConfig(["--token-file", "~/definitely-not-here"], {})).toThrow(
+      /Cannot read the token file at \//,
+    );
+  });
+
   it("uses sane defaults", () => {
     const config = loadConfig([], { MONDAY_API_TOKEN: "t" });
     expect(config.apiUrl).toBe("https://api.monday.com/v2");
-    expect(config.apiVersion).toBe("2024-10");
+    expect(config.apiVersion).toBe("2026-07");
     expect(config.maxRetries).toBe(3);
     expect(config.timeoutMs).toBe(30_000);
   });

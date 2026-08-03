@@ -103,7 +103,8 @@ let itemId;
 
 await step("monday_get_me", async () => {
   const me = await call(client, "monday_get_me");
-  return `${me.name} <${me.email}> on account ${me.account?.name}`;
+  // The email is not printed. A smoke run often ends up pasted in an issue.
+  return `${me.name} on account ${me.account?.name} (${me.account?.slug})`;
 });
 
 await step("monday_list_boards", async () => {
@@ -139,8 +140,8 @@ if (itemId) {
 }
 
 await step("monday_list_users", async () => {
-  const users = await call(client, "monday_list_users", { limit: 5 });
-  return `${users.length} users`;
+  const result = await call(client, "monday_list_users", { limit: 5 });
+  return `${result.users.length} of ${result.scanned} users on this page`;
 });
 
 await step("bad status is refused with the real labels", async () => {

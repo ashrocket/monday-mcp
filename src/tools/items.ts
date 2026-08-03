@@ -24,6 +24,13 @@ import { compactItem, detailedItem, guard, ok } from "../format.js";
 import type { RawItem } from "../format.js";
 import type { ToolContext } from "./context.js";
 
+/**
+ * monday.com ids are numeric, and a model often emits them unquoted. A
+ * strict z.string() turns that into a hard protocol error, so accept both
+ * and normalise to the string the GraphQL layer wants.
+ */
+const idSchema = z.union([z.string(), z.number()]).transform(String);
+
 const FILTER_OPERATORS = [
   "any_of",
   "not_any_of",
@@ -83,11 +90,19 @@ export function buildRule(
     if (EMPTY_OPERATORS.has(operator)) {
       return { column_id: "name", compare_value: [""], operator };
     }
+    // Rewriting an unsupported operator to contains_text would return the
+    // exact rows the caller asked to exclude, so name the problem instead.
+    const NAME_OPERATORS = new Set([...TEXT_OPERATORS, "any_of", "not_any_of"]);
+    if (!NAME_OPERATORS.has(operator)) {
+      throw new ColumnValueError(
+        `The item name does not support the ${operator} operator. ` +
+          `Use one of: ${[...NAME_OPERATORS].join(", ")}.`,
+      );
+    }
     return {
       column_id: "name",
       compare_value: [String(filter.value ?? "")],
-      // The name column holds free text, so an exact match rarely helps.
-      operator: TEXT_OPERATORS.has(operator) ? operator : "contains_text",
+      operator,
     };
   }
 
@@ -141,7 +156,7 @@ export function registerItemTools(context: ToolContext): void {
         "readable text. Filter with `filters`, and follow `cursor` for the next " +
         "page. Call monday_get_board first to learn the column ids and labels.",
       inputSchema: {
-        board_id: z.string().describe("The numeric board id, as a string."),
+        board_id: idSchema.describe("The numeric board id."),
         search: z
           .string()
           .optional()
@@ -234,10 +249,10 @@ export function registerItemTools(context: ToolContext): void {
         "readable text and the stored JSON. Use it before you change an item.",
       inputSchema: {
         item_ids: z
-          .array(z.string())
+          .array(idSchema)
           .min(1)
           .max(100)
-          .describe("Numeric item ids, as strings."),
+          .describe("Numeric item ids. Up to 100 at a time."),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -246,18 +261,34 @@ export function registerItemTools(context: ToolContext): void {
         if (client.allowedBoards.size > 0) {
           for (const id of item_ids) await schemas.boardIdForItem(id);
         }
+        const wanted = [...new Set(item_ids)];
         const data = await client.query<{ items: RawItem[] }>(
           GET_ITEMS,
-          { ids: item_ids },
+          // items() defaults to 25 rows, so a 40 id request would silently
+          // lose 15 of them.
+          { ids: wanted, limit: wanted.length },
           { label: "monday_get_items" },
         );
         const items = data.items ?? [];
         if (items.length === 0) {
           throw new MondayApiError(
-            `No item found for ${item_ids.join(", ")}. Check the ids, or the token may not see the board.`,
+            `No item found for ${wanted.join(", ")}. Check the ids, or the token may not see the board.`,
           );
         }
-        return ok(items.map(detailedItem));
+        const returned = new Set(items.map((item) => String(item.id)));
+        const missing = wanted.filter((id) => !returned.has(id));
+        const detailed = items.map(detailedItem);
+        return ok(
+          missing.length > 0
+            ? {
+                items: detailed,
+                missing_item_ids: missing,
+                note:
+                  "These ids returned nothing. They may not exist, or the token " +
+                  "may not see their board.",
+              }
+            : detailed,
+        );
       }),
   );
 
@@ -273,7 +304,7 @@ export function registerItemTools(context: ToolContext): void {
         '"2026-08-14" for a date. This server converts them to the JSON that ' +
         "monday.com stores. Call monday_get_board first to see the columns.",
       inputSchema: {
-        board_id: z.string().describe("The numeric board id, as a string."),
+        board_id: idSchema.describe("The numeric board id."),
         name: z.string().min(1).describe("The item name."),
         group: z
           .string()
@@ -297,7 +328,10 @@ export function registerItemTools(context: ToolContext): void {
         client.assertWritable("create an item");
         const board = await schemas.get(board_id);
         const groupId = group ? schemas.resolveGroupId(board, group) : null;
-        const columnValues = values ? buildColumnValues(board.columns, values) : null;
+        const createLabels = create_labels_if_missing ?? false;
+        const columnValues = values
+          ? buildColumnValues(board.columns, values, createLabels)
+          : null;
 
         const data = await client.query<{ create_item: Record<string, unknown> }>(
           CREATE_ITEM,
@@ -306,7 +340,7 @@ export function registerItemTools(context: ToolContext): void {
             groupId,
             itemName: name,
             columnValues: columnValues ? JSON.stringify(columnValues) : null,
-            createLabels: create_labels_if_missing ?? false,
+            createLabels,
           },
           { label: "monday_create_item" },
         );
@@ -322,16 +356,18 @@ export function registerItemTools(context: ToolContext): void {
         "Changes the columns of one item, and the item name when `name` is " +
         "given. Values use the same plain form as monday_create_item.",
       inputSchema: {
-        item_id: z.string().describe("The numeric item id, as a string."),
+        item_id: idSchema.describe("The numeric item id."),
         values: z
           .record(z.string(), z.unknown())
           .optional()
           .describe("Column values keyed by column id or column title."),
         name: z.string().optional().describe("A new item name."),
-        board_id: z
-          .string()
+        board_id: idSchema
           .optional()
-          .describe("The board id. The server finds it when you leave this out."),
+          .describe(
+            "The board id. The server finds it when you leave this out, and " +
+              "checks it when you supply it.",
+          ),
         create_labels_if_missing: z
           .boolean()
           .optional()
@@ -346,8 +382,16 @@ export function registerItemTools(context: ToolContext): void {
           throw new MondayApiError("Give `values`, or `name`, or both.");
         }
 
-        const boardId = board_id ?? (await schemas.boardIdForItem(item_id));
-        client.assertBoardAllowed(boardId);
+        // Never trust a caller-supplied board id: it decides both the allow
+        // list check and which column schema the values translate against.
+        const realBoardId = await schemas.boardIdForItem(item_id);
+        if (board_id !== undefined && String(board_id) !== realBoardId) {
+          throw new MondayApiError(
+            `Item ${item_id} is on board ${realBoardId}, not board ${board_id}. ` +
+              "Leave board_id out and the server will find it.",
+          );
+        }
+        const boardId = realBoardId;
         const result: Record<string, unknown> = { item_id, board_id: boardId };
 
         if (name !== undefined) {
@@ -361,21 +405,35 @@ export function registerItemTools(context: ToolContext): void {
 
         if (values) {
           const board = await schemas.get(boardId);
-          const columnValues = buildColumnValues(board.columns, values);
-          const changed = await client.query<{
-            change_multiple_column_values: RawItem;
-          }>(
-            CHANGE_COLUMN_VALUES,
-            {
-              boardId,
-              itemId: item_id,
-              columnValues: JSON.stringify(columnValues),
-              createLabels: create_labels_if_missing ?? false,
-            },
-            { label: "monday_update_item" },
+          const columnValues = buildColumnValues(
+            board.columns,
+            values,
+            create_labels_if_missing ?? false,
           );
-          result.sent_column_values = columnValues;
-          result.item = detailedItem(changed.change_multiple_column_values);
+          try {
+            const changed = await client.query<{
+              change_multiple_column_values: RawItem;
+            }>(
+              CHANGE_COLUMN_VALUES,
+              {
+                boardId,
+                itemId: item_id,
+                columnValues: JSON.stringify(columnValues),
+                createLabels: create_labels_if_missing ?? false,
+              },
+              { label: "monday_update_item" },
+            );
+            result.sent_column_values = columnValues;
+            result.item = detailedItem(changed.change_multiple_column_values);
+          } catch (error) {
+            // The rename may already have gone through. Saying "failed" alone
+            // would invite the caller to redo work that is already done.
+            const note =
+              name !== undefined
+                ? ` The rename to "${name}" DID succeed and does not need repeating.`
+                : "";
+            throw new MondayApiError(`${(error as Error).message}${note}`, { cause: error });
+          }
         }
 
         return ok(result);
@@ -388,7 +446,7 @@ export function registerItemTools(context: ToolContext): void {
       title: "Move an item to a group",
       description: "Moves one item into another group on the same board.",
       inputSchema: {
-        item_id: z.string().describe("The numeric item id, as a string."),
+        item_id: idSchema.describe("The numeric item id."),
         group: z.string().describe("The target group id or group title."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
@@ -415,7 +473,7 @@ export function registerItemTools(context: ToolContext): void {
         "Creates a subitem under a parent item. Column values apply in a " +
         "second step, because a subitem lives on its own hidden board.",
       inputSchema: {
-        parent_item_id: z.string().describe("The numeric id of the parent item."),
+        parent_item_id: idSchema.describe("The numeric id of the parent item."),
         name: z.string().min(1).describe("The subitem name."),
         values: z
           .record(z.string(), z.unknown())
@@ -439,7 +497,10 @@ export function registerItemTools(context: ToolContext): void {
         const subitem = created.create_subitem;
         if (!values) return ok({ created: subitem });
 
-        const subBoard = await schemas.get(subitem.board.id, true);
+        // The subitem board is monday.com's own hidden board. It can never
+        // appear in a user supplied allow list, so it is trusted by way of
+        // the parent item, which was checked above.
+        const subBoard = await schemas.get(subitem.board.id, true, true);
         const columnValues = buildColumnValues(subBoard.columns, values);
         await client.query(
           CHANGE_COLUMN_VALUES,
@@ -463,7 +524,7 @@ export function registerItemTools(context: ToolContext): void {
         "Archives an item by default, which a person can undo in the monday.com " +
         'interface. Mode "delete" removes the item for good and needs confirm true.',
       inputSchema: {
-        item_id: z.string().describe("The numeric item id, as a string."),
+        item_id: idSchema.describe("The numeric item id."),
         mode: z
           .enum(["archive", "delete"])
           .optional()

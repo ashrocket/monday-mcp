@@ -217,8 +217,9 @@ describe("read tools", () => {
       arguments: { name: "ben" },
     })) as CallToolResult;
 
-    expect(jsonOf(result)).toHaveLength(1);
-    expect(jsonOf(result)[0].name).toBe("Ben");
+    expect(jsonOf(result).users).toHaveLength(1);
+    expect(jsonOf(result).users[0].name).toBe("Ben");
+    expect(jsonOf(result).scanned).toBe(2);
   });
 });
 
@@ -395,15 +396,12 @@ describe("safety rails", () => {
     expect(api.calls).toHaveLength(0);
   });
 
-  it("refuses raw GraphQL while an allow list is in force", async () => {
+  it("does not register raw GraphQL while an allow list is in force", async () => {
+    // A raw document can name any board, so the tool could never honour the
+    // list. Registering one that always fails only wastes a model turn.
     const { client } = await connect(makeConfig({ allowedBoards: new Set(["111"]) }));
-    const result = (await client.callTool({
-      name: "monday_graphql",
-      arguments: { query: "query { boards { id } }" },
-    })) as CallToolResult;
-
-    expect(result.isError).toBe(true);
-    expect(textOf(result)).toMatch(/allowed board list/);
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    expect(names).not.toContain("monday_graphql");
   });
 
   it("scopes monday_list_boards to the allow list", async () => {

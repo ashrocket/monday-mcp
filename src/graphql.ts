@@ -109,9 +109,11 @@ export const NEXT_ITEMS_PAGE = /* GraphQL */ `
   }
 `;
 
+// items() defaults to 25 rows. Without an explicit limit a request for 40
+// ids silently returns 25 of them.
 export const GET_ITEMS = /* GraphQL */ `
-  query GetItems($ids: [ID!]!) {
-    items(ids: $ids) {
+  query GetItems($ids: [ID!]!, $limit: Int!) {
+    items(ids: $ids, limit: $limit) {
       id
       name
       state
@@ -154,8 +156,8 @@ export const GET_ITEM_UPDATES = /* GraphQL */ `
 `;
 
 export const LIST_USERS = /* GraphQL */ `
-  query ListUsers($limit: Int!, $ids: [ID!], $kind: UserKind) {
-    users(limit: $limit, ids: $ids, kind: $kind) {
+  query ListUsers($limit: Int!, $page: Int!, $ids: [ID!], $kind: UserKind) {
+    users(limit: $limit, page: $page, ids: $ids, kind: $kind) {
       id
       name
       email

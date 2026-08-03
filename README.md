@@ -7,6 +7,9 @@ It runs on your machine and speaks straight to the monday.com GraphQL API.
 Your token stays on your machine. No relay, no hosted middle layer, no
 telemetry.
 
+> **Unofficial.** This project is not built by monday.com, and it carries no
+> endorsement from monday.com. "monday.com" is a trademark of monday.com Ltd.
+
 ```
 Claude, Cursor, or any MCP client
         |  stdio
@@ -42,6 +45,7 @@ refusal names the labels the column accepts:
 ```
 Column "Status" has no status "Shipped".
 It accepts: "Working on it", "Done", "Stuck".
+Send create_labels_if_missing true to add it.
 ```
 
 Three more things this server does:
@@ -55,11 +59,12 @@ Three more things this server does:
 
 ## Install
 
+Node 20 or newer.
+
 ```bash
 git clone https://github.com/ashrocket/monday-mcp.git
 cd monday-mcp
-npm install
-npm run build
+npm install          # this also builds, through the prepare script
 ```
 
 ## Get an API token
@@ -115,6 +120,10 @@ at the file instead:
 }
 ```
 
+The server takes its configuration from the environment that the MCP client
+gives it. It does **not** read a `.env` file by itself. For local work, use
+Node's own flag: `node --env-file=.env dist/index.js`.
+
 ## Prove it works
 
 ```bash
@@ -145,8 +154,8 @@ The write cycle archives the item that it makes, so it leaves no clutter.
 | `monday_list_workspaces` | List the workspaces. |
 | `monday_graphql` | An escape hatch for anything the other tools miss. |
 
-A read-only server registers the read tools only. The model never sees a
-tool that it cannot use.
+A read-only server registers the nine read tools only. `monday_graphql`
+stays, but it refuses a mutation.
 
 ## Column values
 
@@ -156,7 +165,7 @@ the exact API shape.
 
 | Column type | Send this | Server sends this |
 | --- | --- | --- |
-| `text` | `"some text"` | `"some text"` |
+| `text`, `name` | `"some text"` | `"some text"` |
 | `long_text` | `"a paragraph"` | `{"text": "a paragraph"}` |
 | `numbers` | `42` | `"42"` |
 | `status` | `"Done"` | `{"index": 1}` |
@@ -167,21 +176,31 @@ the exact API shape.
 | `checkbox` | `true` | `{"checked": "true"}` |
 | `link` | `"https://example.com"` | `{"url": "...", "text": "..."}` |
 | `email` | `"a@b.com"` | `{"email": "a@b.com", "text": "a@b.com"}` |
-| `phone` | `"+15551234567"` | `{"phone": "...", "countryShortName": "US"}` |
+| `phone` | `"+442071234567"` or `["07700900123", "GB"]` | `{"phone": "...", "countryShortName": "GB"}` |
 | `tags` | `[1234]` | `{"tag_ids": [1234]}` |
 | `board_relation` | `[987654321]` | `{"item_ids": [987654321]}` |
 | `hour` | `"14:30"` | `{"hour": 14, "minute": 30}` |
 | `rating` | `4` | `{"rating": 4}` |
-| `country` | `"US"` | `{"countryCode": "US", ...}` |
+| `country` | `"GB"` | `{"countryCode": "GB", "countryName": "United Kingdom"}` |
 | `week` | `["2026-08-03", "2026-08-09"]` | `{"week": {"startDate": "...", "endDate": "..."}}` |
-| `location` | `"10 Downing Street"` | `{"address": "10 Downing Street"}` |
 | `world_clock` | `"Europe/London"` | `{"timezone": "Europe/London"}` |
+| `location` | `{"lat": "51.5", "lng": "-0.12", "address": "London"}` | the same object |
 
 Send `null` to clear a column.
 
-A `formula`, `mirror`, `auto_number`, `creation_log`, `last_updated`,
-`item_id`, `progress`, `vote` or `time_tracking` column is not writable.
-monday.com computes it. The server says so instead of failing at the API.
+Three notes on the awkward ones:
+
+- **`phone`** needs a country as well as a number. An international number
+  carries one, so `"+442071234567"` works. A local number does not, so send
+  `["07700900123", "GB"]`.
+- **`location`** stores coordinates. monday.com does not turn an address into
+  coordinates, and neither does this server, so send `lat` and `lng`.
+- **`status` and `dropdown`** reject a label the board does not have. Pass
+  `create_labels_if_missing: true` to add it instead.
+
+These types are not writable, because monday.com computes them:
+`auto_number`, `button`, `creation_log`, `formula`, `integration`, `item_id`,
+`last_updated`, `mirror`, `progress`, `subtasks`, `time_tracking`, `vote`.
 
 A `file` or `doc` column needs the separate upload endpoint, which this
 server does not expose.
@@ -191,7 +210,7 @@ server does not expose.
 | Setting | Effect |
 | --- | --- |
 | `--read-only` or `MONDAY_READ_ONLY=1` | Only read tools get registered. A raw mutation is refused. |
-| `--boards 111,222` or `MONDAY_ALLOWED_BOARDS=111,222` | Every other board becomes invisible. Raw GraphQL is refused, because it cannot honour the list. |
+| `--boards 111,222` or `MONDAY_ALLOWED_BOARDS=111,222` | Every other board becomes invisible. `monday_graphql` is not registered at all, because a raw document cannot honour the list. |
 | `mode: "delete"` | Needs `confirm: true`. The default mode archives instead, which a person can undo. |
 
 The token never appears in a tool result or an error message. The client
@@ -205,35 +224,55 @@ redacts it before anything leaves the process.
 | `--token-file` | `MONDAY_API_TOKEN_FILE` | none |
 | `--read-only` | `MONDAY_READ_ONLY` | off |
 | `--boards` | `MONDAY_ALLOWED_BOARDS` | all boards |
-| `--api-version` | `MONDAY_API_VERSION` | `2024-10` |
+| `--api-version` | `MONDAY_API_VERSION` | `2026-07` |
 | `--api-url` | `MONDAY_API_URL` | `https://api.monday.com/v2` |
 | | `MONDAY_TIMEOUT_MS` | `30000` |
 | | `MONDAY_MAX_RETRIES` | `3` |
 
 A flag always wins over the matching environment variable.
 
+### About the API version
+
+monday.com retires an API version every quarter, and a request that names a
+retired version quietly gets the maintenance version instead. That makes a
+stale default worse than no default, so this server pins a current one and
+you can override it. Check the
+[versioning page](https://developer.monday.com/api-reference/docs/api-versioning)
+when you upgrade.
+
 ## Rate limits
 
 monday.com meters a complexity budget, not a request count. The client reads
-the reset hint out of a throttle message and waits for that long. Other
-transient failures use exponential backoff. Board layouts stay in a cache for
-one minute, which keeps a run of writes off the budget.
+the reset hint from the throttle response, whether it arrives in the
+`retry-after` header or in the message body, and waits for that long. Other
+transient failures use exponential backoff.
+
+Retrying stops after about 45 seconds in total. A complexity window can be a
+full minute, and waiting three of them outlasts every MCP client, so the
+server reports the throttle and lets the caller decide to try again.
+
+Board layouts stay in a cache for one minute, which keeps a run of writes off
+the budget.
 
 ## Develop
 
 ```bash
-npm test          # 79 tests, no network
-npm run typecheck
+npm test          # 115 tests, no network
+npm run typecheck # source and tests
 npm run build
 npm run dev       # rebuild on save
 ```
 
 The tests run the real MCP server against a fake monday.com API over an
 in-memory transport. They assert the exact JSON that goes over the wire.
+`test/regressions.test.ts` holds one test per defect found so far, named
+after the behaviour that was wrong.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). To report a security problem, see
+[SECURITY.md](SECURITY.md).
 
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
-
-This project is not built by monday.com and it carries no endorsement from
-monday.com. "monday.com" belongs to monday.com Ltd.

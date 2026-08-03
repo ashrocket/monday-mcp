@@ -13,7 +13,8 @@ import type { ToolContext } from "./context.js";
 /** A short note that shows a model exactly what to send for this column. */
 function writeExample(column: BoardColumn): unknown {
   switch (column.type) {
-    case "status": {
+    case "status":
+    case "color": {
       const labels = statusLabels(column);
       return labels[0] ?? "a status label";
     }
@@ -61,7 +62,7 @@ export function describeColumn(column: BoardColumn): Record<string, unknown> {
   const writable =
     !READ_ONLY_TYPES.has(column.type) && !UNSUPPORTED_WRITE_TYPES.has(column.type);
   const options =
-    column.type === "status"
+    column.type === "status" || column.type === "color"
       ? statusLabels(column)
       : column.type === "dropdown"
         ? dropdownLabels(column)
@@ -91,9 +92,13 @@ export function registerBoardTools({ server, client, schemas }: ToolContext): vo
         name: z
           .string()
           .optional()
-          .describe("Keep only boards whose name holds this text, ignoring letter case."),
+          .describe(
+            "Keep only boards whose name holds this text, ignoring letter case. " +
+              "This filters the fetched page only, so advance `page` if nothing matches.",
+          ),
         workspace_id: z
-          .string()
+          .union([z.string(), z.number()])
+          .transform(String)
           .optional()
           .describe("Keep only boards in this workspace."),
         limit: z.number().int().min(1).max(200).optional().describe("Default 50."),
@@ -115,14 +120,29 @@ export function registerBoardTools({ server, client, schemas }: ToolContext): vo
           { label: "monday_list_boards" },
         );
 
-        let boards = data.boards ?? [];
+        const fetched = data.boards ?? [];
+        const pageSize = limit ?? 50;
+        const pageNumber = page ?? 1;
+        let boards = fetched;
         if (name) {
           const wanted = name.toLowerCase();
-          boards = boards.filter((board) =>
+          boards = fetched.filter((board) =>
             String(board.name ?? "").toLowerCase().includes(wanted),
           );
         }
-        return ok({ count: boards.length, boards });
+        // A caller that sees count 0 must be able to tell "no such board"
+        // from "not on this page".
+        const hasMore = fetched.length === pageSize;
+        return ok({
+          count: boards.length,
+          scanned: fetched.length,
+          page: pageNumber,
+          has_more: hasMore,
+          ...(hasMore && boards.length === 0
+            ? { next: `No match on page ${pageNumber}. Try page ${pageNumber + 1}.` }
+            : {}),
+          boards,
+        });
       }),
   );
 
@@ -135,7 +155,10 @@ export function registerBoardTools({ server, client, schemas }: ToolContext): vo
         "status and dropdown column accepts. Call this before you create or " +
         "change an item, because a column value must match its column type.",
       inputSchema: {
-        board_id: z.string().describe("The numeric board id, as a string."),
+        board_id: z
+          .union([z.string(), z.number()])
+          .transform(String)
+          .describe("The numeric board id."),
         refresh: z
           .boolean()
           .optional()

@@ -9,6 +9,8 @@ coverage/
 !.env.example
 *.token
 .monday-token
+.npmrc
+*.tgz
 
 .DS_Store
 .vscode/

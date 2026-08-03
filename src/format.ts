@@ -3,8 +3,10 @@ import { decodeColumnValue } from "./columns.js";
 
 /** Wraps any value as a successful tool result. */
 export function ok(data: unknown): CallToolResult {
+  // JSON.stringify(undefined) is undefined, and the SDK rejects a text
+  // part with no text.
   const text =
-    typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    typeof data === "string" ? data : (JSON.stringify(data, null, 2) ?? "null");
   return { content: [{ type: "text", text }] };
 }
 
@@ -68,7 +70,10 @@ export function compactItem(item: RawItem): Record<string, unknown> {
   for (const column of item.column_values ?? []) {
     const title = column.column?.title ?? column.id;
     const text = displayText(column);
-    if (text !== null) values[title] = text;
+    if (text === null) continue;
+    // Duplicate column titles are legal on a board. Fall back to the column
+    // id for the second one, so neither value disappears.
+    values[title in values ? column.id : title] = text;
   }
   return {
     id: item.id,

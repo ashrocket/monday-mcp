@@ -30,15 +30,27 @@ export class MondayApiError extends Error {
   }
 }
 
-/** Error codes that a second attempt can fix. */
+/**
+ * Error codes that a second attempt can fix. monday.com has changed these
+ * spellings over the years, so the comparison is normalised rather than
+ * exact.
+ */
 const RETRYABLE_CODES = new Set([
-  "ComplexityException",
-  "RateLimitExceeded",
-  "Internal Server Error",
-  "InternalServerError",
+  "complexitybudgetexhausted",
+  "complexityexception",
+  "ratelimitexceeded",
+  "internalservererror",
+  "maxconcurrencyexceeded",
 ]);
 
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
+/** Total time the retry loop may spend before it gives up and reports. */
+const RETRY_DEADLINE_MS = 45_000;
+
+function normaliseCode(code: string | undefined): string {
+  return (code ?? "").toLowerCase().replace(/[^a-z]/g, "");
+}
 
 /** Reads the "reset in N seconds" hint out of a complexity message. */
 export function parseResetSeconds(message: string): number | undefined {
@@ -51,6 +63,14 @@ export function parseResetSeconds(message: string): number | undefined {
 export function redact(text: string, token: string): string {
   if (!token) return text;
   return text.split(token).join("<redacted-token>");
+}
+
+/**
+ * Redacts first, then truncates. The other order can cut a token in half
+ * and leave the first part of it in the message.
+ */
+function safeExcerpt(text: string, token: string, limit = 400): string {
+  return redact(text, token).slice(0, limit);
 }
 
 const sleep = (ms: number): Promise<void> =>
@@ -73,10 +93,16 @@ export interface QueryOptions {
 export class MondayClient {
   private readonly config: Config;
   private readonly fetchImpl: typeof fetch;
+  private readonly now: () => number;
 
-  constructor(config: Config, fetchImpl: typeof fetch = fetch) {
+  constructor(
+    config: Config,
+    fetchImpl: typeof fetch = fetch,
+    now: () => number = Date.now,
+  ) {
     this.config = config;
     this.fetchImpl = fetchImpl;
+    this.now = now;
   }
 
   get readOnly(): boolean {
@@ -116,6 +142,7 @@ export class MondayClient {
     options: QueryOptions = {},
   ): Promise<T> {
     const maxRetries = options.maxRetries ?? this.config.maxRetries;
+    const startedAt = this.now();
     let lastError: MondayApiError | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -125,14 +152,32 @@ export class MondayClient {
         const apiError =
           error instanceof MondayApiError
             ? error
-            : new MondayApiError(
-                redact((error as Error).message, this.config.token),
-                { cause: error },
-              );
+            : new MondayApiError(redact((error as Error).message, this.config.token), {
+                cause: error,
+              });
         lastError = apiError;
 
         if (attempt === maxRetries || !this.isRetryable(apiError)) break;
-        await sleep(this.backoffMs(apiError, attempt));
+
+        const wait = this.backoffMs(apiError, attempt);
+        const elapsed = this.now() - startedAt;
+        // A complexity window can be a full minute. Waiting three of them
+        // outlasts every MCP client, so report instead and let the caller
+        // decide to try again.
+        if (elapsed + wait > RETRY_DEADLINE_MS) {
+          lastError = new MondayApiError(
+            `${apiError.message} The server stopped retrying after ` +
+              `${Math.round(elapsed / 1000)} seconds. Wait for the reset, then try again.`,
+            {
+              status: apiError.status,
+              errorCode: apiError.errorCode,
+              errors: apiError.errors,
+              cause: apiError,
+            },
+          );
+          break;
+        }
+        await sleep(wait);
       }
     }
 
@@ -147,9 +192,15 @@ export class MondayClient {
 
   private isRetryable(error: MondayApiError): boolean {
     if (RETRYABLE_STATUS.has(error.status)) return true;
-    if (error.errorCode && RETRYABLE_CODES.has(error.errorCode)) return true;
-    // A socket hang-up or a DNS blip has no status at all.
-    return error.status === 0 && /fetch|network|socket|ECONN|timeout/i.test(error.message);
+    if (RETRYABLE_CODES.has(normaliseCode(error.errorCode))) return true;
+    if (/complexity budget|rate limit/i.test(error.message)) return true;
+    // A socket hang-up, a DNS blip or an abort has no status at all.
+    return (
+      error.status === 0 &&
+      /fetch failed|network|socket|ECONN|ETIMEDOUT|EAI_AGAIN|timed out|timeout/i.test(
+        error.message,
+      )
+    );
   }
 
   private backoffMs(error: MondayApiError, attempt: number): number {
@@ -163,93 +214,116 @@ export class MondayClient {
     variables: Record<string, unknown>,
   ): Promise<T> {
     const controller = new AbortController();
+    // The timer must cover reading the body as well. Clearing it as soon as
+    // the headers arrive lets a stalled body hang the tool forever.
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
 
-    let response: Response;
     try {
-      response = await this.fetchImpl(this.config.apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: this.config.token,
-          "API-Version": this.config.apiVersion,
-          "User-Agent": "monday-mcp (+https://github.com/ashrocket/monday-mcp)",
-        },
-        body: JSON.stringify({ query: document, variables }),
-        signal: controller.signal,
-      });
-    } catch (error) {
-      const reason =
-        (error as Error).name === "AbortError"
-          ? `The request timed out after ${this.config.timeoutMs} ms.`
-          : `The request failed: ${(error as Error).message}`;
-      throw new MondayApiError(redact(reason, this.config.token), { cause: error });
-    } finally {
-      clearTimeout(timer);
-    }
-
-    const rawBody = await response.text();
-    let body: Record<string, unknown> = {};
-    if (rawBody.length > 0) {
+      let response: Response;
       try {
-        body = JSON.parse(rawBody) as Record<string, unknown>;
-      } catch {
+        response = await this.fetchImpl(this.config.apiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: this.config.token,
+            "API-Version": this.config.apiVersion,
+            "User-Agent": "monday-mcp (+https://github.com/ashrocket/monday-mcp)",
+          },
+          body: JSON.stringify({ query: document, variables }),
+          signal: controller.signal,
+        });
+      } catch (error) {
+        const reason =
+          (error as Error).name === "AbortError"
+            ? `The request timed out after ${this.config.timeoutMs} ms.`
+            : `The request failed: ${(error as Error).message}`;
+        throw new MondayApiError(redact(reason, this.config.token), { cause: error });
+      }
+
+      let rawBody: string;
+      try {
+        rawBody = await response.text();
+      } catch (error) {
+        const reason =
+          (error as Error).name === "AbortError"
+            ? `The response body timed out after ${this.config.timeoutMs} ms.`
+            : `The response body could not be read: ${(error as Error).message}`;
+        throw new MondayApiError(redact(reason, this.config.token), {
+          status: response.status,
+          cause: error,
+        });
+      }
+
+      let body: Record<string, unknown> = {};
+      if (rawBody.length > 0) {
+        try {
+          body = JSON.parse(rawBody) as Record<string, unknown>;
+        } catch {
+          throw new MondayApiError(
+            `The API answered with HTTP ${response.status} and a body that is not JSON: ` +
+              safeExcerpt(rawBody, this.config.token),
+            { status: response.status },
+          );
+        }
+      }
+
+      if (response.status === 401 || response.status === 403) {
         throw new MondayApiError(
-          `The API answered with HTTP ${response.status} and a body that is not JSON: ` +
-            redact(rawBody.slice(0, 400), this.config.token),
+          "The API rejected the token. Check MONDAY_API_TOKEN. " +
+            "A token from Developers > My access tokens works for your own user.",
           { status: response.status },
         );
       }
-    }
 
-    if (response.status === 401 || response.status === 403) {
-      throw new MondayApiError(
-        "The API rejected the token. Check MONDAY_API_TOKEN. " +
-          "A token from Developers > My access tokens works for your own user.",
-        { status: response.status },
-      );
-    }
+      const errors = this.collectErrors(body);
 
-    // monday.com puts the retry hint in a header on a hard throttle.
-    if (response.status === 429) {
-      const retryAfter = response.headers.get("retry-after");
-      throw new MondayApiError(
-        `Rate limited by monday.com${retryAfter ? `, reset in ${retryAfter} seconds` : ""}.`,
-        { status: 429, errorCode: "RateLimitExceeded" },
-      );
-    }
+      // monday.com puts the reset hint in the body as often as in a header,
+      // so read both before giving up on this attempt.
+      if (response.status === 429) {
+        const retryAfter = response.headers.get("retry-after");
+        const fromBody = errors.map((item) => item.message).join("; ");
+        const hint = retryAfter
+          ? `reset in ${retryAfter} seconds`
+          : (parseResetSeconds(fromBody) !== undefined ? fromBody : "");
+        throw new MondayApiError(
+          `Rate limited by monday.com${hint ? `, ${hint}` : ""}.`,
+          { status: 429, errorCode: "RateLimitExceeded", errors },
+        );
+      }
 
-    const errors = this.collectErrors(body);
-    if (errors.length > 0) {
-      const errorCode =
-        typeof body.error_code === "string"
-          ? body.error_code
-          : (errors[0]?.extensions?.code as string | undefined);
-      const message = errors.map((item) => item.message).join("; ");
-      throw new MondayApiError(redact(message, this.config.token), {
-        status: response.status,
-        errorCode,
-        errors,
-      });
-    }
+      if (errors.length > 0) {
+        const errorCode =
+          typeof body.error_code === "string"
+            ? body.error_code
+            : (errors[0]?.extensions?.code as string | undefined);
+        const message = errors.map((item) => item.message).join("; ");
+        throw new MondayApiError(redact(message, this.config.token), {
+          status: response.status,
+          errorCode,
+          errors,
+        });
+      }
 
-    if (!response.ok) {
-      throw new MondayApiError(
-        `The API answered with HTTP ${response.status}: ` +
-          redact(rawBody.slice(0, 400), this.config.token),
-        { status: response.status },
-      );
-    }
+      if (!response.ok) {
+        throw new MondayApiError(
+          `The API answered with HTTP ${response.status}: ` +
+            safeExcerpt(rawBody, this.config.token),
+          { status: response.status },
+        );
+      }
 
-    if (body.data === undefined || body.data === null) {
-      throw new MondayApiError(
-        "The API answered without a data object. " +
-          redact(rawBody.slice(0, 400), this.config.token),
-        { status: response.status },
-      );
-    }
+      if (body.data === undefined || body.data === null) {
+        throw new MondayApiError(
+          "The API answered without a data object. " +
+            safeExcerpt(rawBody, this.config.token),
+          { status: response.status },
+        );
+      }
 
-    return body.data as T;
+      return body.data as T;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**

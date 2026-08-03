@@ -36,7 +36,7 @@ const TTL_MS = 60_000;
 export class BoardSchemaCache {
   private readonly client: MondayClient;
   private readonly entries = new Map<string, { at: number; schema: BoardSchema }>();
-  private readonly itemBoards = new Map<string, string>();
+  private readonly itemBoards = new Map<string, { at: number; boardId: string }>();
   private readonly now: () => number;
 
   constructor(client: MondayClient, now: () => number = Date.now) {
@@ -50,10 +50,20 @@ export class BoardSchemaCache {
     else this.entries.clear();
   }
 
-  /** Fetches a board schema, from the cache when it is fresh. */
-  async get(boardId: string | number, force = false): Promise<BoardSchema> {
+  /**
+   * Fetches a board schema, from the cache when it is fresh.
+   *
+   * `trusted` skips the allow list check. It exists for a board this server
+   * derived itself, such as the hidden board that holds subitems, which can
+   * never appear in a user supplied allow list.
+   */
+  async get(
+    boardId: string | number,
+    force = false,
+    trusted = false,
+  ): Promise<BoardSchema> {
     const key = String(boardId);
-    this.client.assertBoardAllowed(key);
+    if (!trusted) this.client.assertBoardAllowed(key);
 
     const cached = this.entries.get(key);
     if (!force && cached && this.now() - cached.at < TTL_MS) return cached.schema;
@@ -76,10 +86,12 @@ export class BoardSchemaCache {
   /** Finds which board holds an item. The answer never changes, so it stays. */
   async boardIdForItem(itemId: string | number): Promise<string> {
     const key = String(itemId);
+    // An item can be moved to another board, so this expires like the
+    // board schema rather than living for the whole process.
     const known = this.itemBoards.get(key);
-    if (known) {
-      this.client.assertBoardAllowed(known);
-      return known;
+    if (known && this.now() - known.at < TTL_MS) {
+      this.client.assertBoardAllowed(known.boardId);
+      return known.boardId;
     }
 
     const data = await this.client.query<{
@@ -93,7 +105,8 @@ export class BoardSchemaCache {
       );
     }
     this.client.assertBoardAllowed(boardId);
-    this.itemBoards.set(key, boardId);
+    if (this.itemBoards.size > 500) this.itemBoards.clear();
+    this.itemBoards.set(key, { at: this.now(), boardId });
     return boardId;
   }
 
