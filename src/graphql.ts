@@ -241,8 +241,9 @@ export const CHANGE_COLUMN_VALUES = /* GraphQL */ `
   }
 `;
 
+// The `value` argument of change_simple_column_value is String!, not JSON!.
 export const CHANGE_ITEM_NAME = /* GraphQL */ `
-  mutation ChangeItemName($boardId: ID!, $itemId: ID!, $value: JSON!) {
+  mutation ChangeItemName($boardId: ID!, $itemId: ID!, $value: String!) {
     change_simple_column_value(
       board_id: $boardId
       item_id: $itemId

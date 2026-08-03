@@ -157,9 +157,24 @@ describe("read tools", () => {
     const call = context.api.lastCall("ListItems");
     expect((call?.variables.queryParams as any).rules[0]).toEqual({
       column_id: "name",
-      compare_value: "ship",
+      compare_value: ["ship"],
       operator: "contains_text",
     });
+  });
+
+  it("wraps a text filter value in an array, as monday.com requires", async () => {
+    await context.client.callTool({
+      name: "monday_list_items",
+      arguments: {
+        board_id: "111",
+        filters: [{ column: "Notes", operator: "contains_text", value: "review" }],
+      },
+    });
+
+    const call = context.api.lastCall("ListItems");
+    expect((call?.variables.queryParams as any).rules).toEqual([
+      { column_id: "text_1", compare_value: ["review"], operator: "contains_text" },
+    ]);
   });
 
   it("follows a cursor without repeating the filters", async () => {

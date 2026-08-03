@@ -77,15 +77,16 @@ export function buildRule(
 ): Record<string, unknown> {
   const operator = filter.operator ?? "any_of";
 
+  // monday.com wants compare_value as an array for every operator, the text
+  // operators included.
   if (filter.column.toLowerCase() === "name") {
     if (EMPTY_OPERATORS.has(operator)) {
       return { column_id: "name", compare_value: [""], operator };
     }
     return {
       column_id: "name",
-      compare_value: TEXT_OPERATORS.has(operator)
-        ? String(filter.value ?? "")
-        : [String(filter.value ?? "")],
+      compare_value: [String(filter.value ?? "")],
+      // The name column holds free text, so an exact match rarely helps.
       operator: TEXT_OPERATORS.has(operator) ? operator : "contains_text",
     };
   }
@@ -103,7 +104,7 @@ export function buildRule(
   }
 
   if (TEXT_OPERATORS.has(operator)) {
-    return { column_id: column.id, compare_value: String(filter.value), operator };
+    return { column_id: column.id, compare_value: [String(filter.value)], operator };
   }
 
   const values = Array.isArray(filter.value) ? filter.value : [filter.value];
