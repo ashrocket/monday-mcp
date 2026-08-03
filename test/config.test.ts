@@ -1,5 +1,5 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig, parseArgs } from "../src/config.js";
@@ -71,10 +71,17 @@ describe("loadConfig", () => {
     expect(loadConfig([], { MONDAY_API_TOKEN: "t", MONDAY_MAX_RETRIES: "0" }).maxRetries).toBe(0);
   });
 
-  it("expands a bare tilde in a token file path", () => {
-    expect(() => loadConfig(["--token-file", "~/definitely-not-here"], {})).toThrow(
-      /Cannot read the token file at \//,
-    );
+  it("expands a tilde in a token file path", () => {
+    // The separator differs by platform, so assert the expansion itself.
+    let message = "";
+    try {
+      loadConfig(["--token-file", "~/definitely-not-here"], {});
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("Cannot read the token file at");
+    expect(message).toContain(homedir());
+    expect(message).not.toContain("~");
   });
 
   it("uses sane defaults", () => {
