@@ -368,9 +368,12 @@ node scripts/cdp-desktop.mjs shot out.png                      # screenshot the 
 
 > ⚠️ **Security — read before using.** `--remote-debugging-port` opens an **unauthenticated**
 > port on `localhost`. While it is open, *any* local process can read and drive your
-> logged‑in monday.com session — no password required. Only run it when you want this, and
-> **quit the app when done** (`osascript -e 'quit app "monday.com"'`) to close the port.
-> Launching also restarts the app, losing any unsaved in‑app state.
+> logged‑in monday.com session — no password required. "Any local process" is broad: a
+> browser extension with a native messaging host, background dev tooling, or a malicious
+> `npm` postinstall script all qualify, and none of them need your credentials to act as
+> you in monday.com. Only run it when you want this, and **quit the app when done**
+> (`osascript -e 'quit app "monday.com"'`) to close the port. Launching also restarts the
+> app, losing any unsaved in‑app state.
 
 Notes learned while building this: a cold `Page.navigate` to `/boards/<id>/pulses/<item_id>`
 **does** open the item card (deep links only appear to "hang" under drivers that wait for
