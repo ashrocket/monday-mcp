@@ -15,7 +15,7 @@ Options:
   --token-file <path>    A file that holds the token.
   --read-only            Register read tools only.
   --boards <id,id>       Limit the server to these board ids.
-  --api-version <date>   The monday.com API version. Default 2024-10.
+  --api-version <date>   The monday.com API version. Default 2026-07.
   --api-url <url>        A different endpoint, for a proxy or a test.
   --help                 Show this text.
   --version              Show the version.

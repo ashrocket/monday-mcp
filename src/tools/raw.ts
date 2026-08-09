@@ -29,7 +29,7 @@ export function registerRawTool({ server, client }: ToolContext): void {
         (client.readOnly
           ? "Sends a GraphQL query straight to the monday.com API. This server " +
             "is read-only, so a mutation is refused. "
-          : "Sends a GraphQL query or mutation straight to the monday.com API. ") + +
+          : "Sends a GraphQL query or mutation straight to the monday.com API. ") +
         "Use it only for something the other tools do not cover, such as " +
         "boards, docs or webhooks. The other tools handle column value " +
         "translation for you, so prefer them for item work.",
