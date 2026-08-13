@@ -1,6 +1,6 @@
 {
   "name": "@ashrocket/monday-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Unofficial local Model Context Protocol server for the monday.com API. Runs on your machine, talks straight to monday.com, keeps your token local.",
   "license": "MIT",
   "author": "Ashley Raiteri",
