@@ -59,6 +59,18 @@ function connect(wsUrl) {
   return { ws, ready, send };
 }
 
+// Page.navigate destroys the JS execution context. An evaluate issued straight after it
+// runs against the dead one and comes back null — which reads exactly like "the page
+// loaded but the element is missing". Probe until the new context answers.
+async function waitForContext(send, timeoutMs = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try { if ((await evaluate(send, '1')) === 1) return; } catch { /* still rebuilding */ }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error(`No live JS context ${timeoutMs}ms after navigating.`);
+}
+
 async function evaluate(send, expression) {
   await send('Runtime.enable');
   const r = await send('Runtime.evaluate', {
@@ -72,7 +84,8 @@ async function evaluate(send, expression) {
 const POLL_CARD = `(async () => {
   const sleep = ms => new Promise(r=>setTimeout(r,ms));
   const t0 = Date.now();
-  while (Date.now()-t0 < 18000) {
+  // A cold board load is slow; 18s produced false "card did not open" results.
+  while (Date.now()-t0 < 45000) {
     if (location.pathname.includes('/pulses/') && document.querySelector('[data-testid="new-post-update-placeholder"],[data-testid="posts-list-container"]')) break;
     await sleep(400);
   }
@@ -96,11 +109,13 @@ async function main() {
       console.log(JSON.stringify(await evaluate(send, args.join(' ')), null, 2));
     } else if (cmd === 'nav') {
       await send('Page.enable'); await send('Page.navigate', { url: args[0] });
+      await waitForContext(send);
       console.log(JSON.stringify(await evaluate(send, POLL_CARD), null, 2));
     } else if (cmd === 'open') {
       const [slug, board, item] = args;
       await send('Page.enable');
       await send('Page.navigate', { url: `https://${slug}.monday.com/boards/${board}/pulses/${item}` });
+      await waitForContext(send);
       console.log(JSON.stringify(await evaluate(send, POLL_CARD), null, 2));
     } else if (cmd === 'shot') {
       await send('Page.enable');

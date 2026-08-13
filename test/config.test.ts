@@ -39,6 +39,45 @@ describe("loadConfig", () => {
     expect(() => loadConfig([], {})).toThrow(/My access tokens/);
   });
 
+  it("offers desktop-only in the no-token message", () => {
+    expect(() => loadConfig([], {})).toThrow(/--desktop-only/);
+  });
+
+  // A missing token must stay loud unless desktop-only was asked for, or a
+  // typo would silently boot a server with no API tools.
+  it("allows an empty token only when desktop-only is set", () => {
+    expect(loadConfig(["--desktop-only"], {}).token).toBe("");
+    expect(loadConfig(["--desktop-only"], {}).desktopOnly).toBe(true);
+    expect(loadConfig([], { MONDAY_DESKTOP_ONLY: "1" }).desktopOnly).toBe(true);
+    expect(() => loadConfig([], { MONDAY_API_TOKEN: "" })).toThrow(ConfigError);
+  });
+
+  it("keeps the token when desktop-only is set alongside one", () => {
+    const config = loadConfig(["--desktop-only"], { MONDAY_API_TOKEN: "t" });
+    expect(config.token).toBe("t");
+    expect(config.desktopOnly).toBe(true);
+  });
+
+  it("reads the account slug and the debug port", () => {
+    const flags = loadConfig(["--desktop-only", "--account-slug", "astriata", "--debug-port", "9333"], {});
+    expect(flags.accountSlug).toBe("astriata");
+    expect(flags.debugPort).toBe(9_333);
+
+    const env = loadConfig([], {
+      MONDAY_API_TOKEN: "t",
+      MONDAY_ACCOUNT_SLUG: "  astriata  ",
+      MONDAY_DEBUG_PORT: "9444",
+    });
+    expect(env.accountSlug).toBe("astriata");
+    expect(env.debugPort).toBe(9_444);
+  });
+
+  it("defaults the debug port to 9222 and leaves the slug unset", () => {
+    const config = loadConfig([], { MONDAY_API_TOKEN: "t" });
+    expect(config.debugPort).toBe(9_222);
+    expect(config.accountSlug).toBeUndefined();
+  });
+
   it("prefers a flag over the environment", () => {
     const config = loadConfig(["--token", "from-flag"], { MONDAY_API_TOKEN: "from-env" });
     expect(config.token).toBe("from-flag");

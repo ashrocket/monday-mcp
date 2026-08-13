@@ -8,6 +8,7 @@ import { registerBoardTools } from "./tools/boards.js";
 import { registerItemTools } from "./tools/items.js";
 import { registerRawTool } from "./tools/raw.js";
 import { registerUpdateTools } from "./tools/updates.js";
+import { registerLocateTools } from "./tools/locate.js";
 import type { ToolContext } from "./tools/context.js";
 
 export const SERVER_NAME = "monday-mcp";
@@ -32,8 +33,26 @@ const WRITE_STEPS = `
    them to the JSON that monday.com stores.
 `.trim();
 
+const DESKTOP_ONLY_STEPS = `
+No API token is configured, so this server has NO tools that read or write
+monday.com data directly. Only these are available:
+
+1. monday_resolve_location turns ids into the URL that addresses them.
+2. monday_open navigates the monday.com desktop app to that URL.
+3. monday_ui_action reads an item card, or posts an update on it.
+
+These ride the session already signed in to the desktop app, which must be
+running with a debug port. Board grid cells are a canvas, not DOM, so no tool
+here can read a cell value. Ask the user for an API token if the task needs
+board data, rather than trying to scrape it.
+`.trim();
+
 /** The server description an MCP client shows to the model. */
 export function buildInstructions(config: Config): string {
+  if (config.desktopOnly && !config.token) {
+    return ["Tools for a monday.com account.", "", DESKTOP_ONLY_STEPS].join("\n");
+  }
+
   const parts = ["Tools for a monday.com account.", "", "Work in this order:", READ_STEPS];
 
   if (!config.readOnly) parts.push(WRITE_STEPS);
@@ -66,6 +85,14 @@ export function createServer(config: Config, fetchImpl?: typeof fetch): McpServe
     { instructions: buildInstructions(config), capabilities: { tools: {} } },
   );
 
+  // In desktop-only mode there is no token, so there is no client either.
+  // Constructing one with an empty token would turn a clear config problem
+  // into a 401 from monday.com at the first call.
+  if (config.desktopOnly && !config.token) {
+    registerLocateTools({ server, config });
+    return server;
+  }
+
   const client = new MondayClient(config, fetchImpl);
   const schemas = new BoardSchemaCache(client);
   const context: ToolContext = { server, client, schemas, config };
@@ -75,6 +102,7 @@ export function createServer(config: Config, fetchImpl?: typeof fetch): McpServe
   registerItemTools(context);
   registerUpdateTools(context);
   registerRawTool(context);
+  registerLocateTools({ server, config, client });
 
   return server;
 }

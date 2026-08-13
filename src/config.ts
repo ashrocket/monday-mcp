@@ -4,8 +4,24 @@ import { resolve } from "node:path";
 
 /** Everything the server needs to know before it starts. */
 export interface Config {
-  /** The monday.com personal API token. */
+  /**
+   * The monday.com personal API token. Empty only in desktop-only mode, where
+   * no API tool is registered and nothing ever reads it.
+   */
   token: string;
+  /**
+   * True runs without a token: the API tools are absent and only the
+   * addressing and desktop tools load. Must be asked for explicitly, so a
+   * mistyped token still fails loudly instead of silently degrading.
+   */
+  desktopOnly: boolean;
+  /**
+   * Account subdomain, needed to build any URL. With a token the server can
+   * read it from me{account{slug}}; without one this is the only source.
+   */
+  accountSlug?: string;
+  /** Port that the desktop app's --remote-debugging-port opened. */
+  debugPort: number;
   /** GraphQL endpoint. Override only for a proxy or a test double. */
   apiUrl: string;
   /** API version header. monday.com pins behaviour to this date string. */
@@ -81,6 +97,9 @@ export interface CliOptions {
   apiUrl?: string;
   apiVersion?: string;
   allowedBoards?: string;
+  desktopOnly?: boolean;
+  accountSlug?: string;
+  debugPort?: string;
 }
 
 /**
@@ -123,6 +142,15 @@ export function parseArgs(argv: string[]): CliOptions {
       case "boards":
         options.allowedBoards = nextValue();
         break;
+      case "desktop-only":
+        options.desktopOnly = inlineValue === undefined ? true : parseBool(inlineValue);
+        break;
+      case "account-slug":
+        options.accountSlug = nextValue();
+        break;
+      case "debug-port":
+        options.debugPort = nextValue();
+        break;
       default:
         break;
     }
@@ -145,7 +173,12 @@ export function loadConfig(
   if (!token && tokenFile) token = readTokenFile(tokenFile);
   token = token.trim();
 
-  if (!token) {
+  const desktopOnly = options.desktopOnly ?? parseBool(env.MONDAY_DESKTOP_ONLY);
+
+  // A missing token stays a hard failure unless desktop-only was asked for.
+  // Otherwise a typo in MONDAY_API_TOKEN would quietly boot a server with no
+  // API tools, which reads like a broken account rather than a broken config.
+  if (!token && !desktopOnly) {
     throw new ConfigError(
       [
         "No monday.com API token found.",
@@ -158,12 +191,19 @@ export function loadConfig(
         "",
         "Get a token in monday.com:",
         "  Avatar (bottom left) > Developers > My access tokens > Show",
+        "",
+        "Or run without a token, exposing only the addressing and desktop",
+        "tools, which ride the session in the monday.com desktop app:",
+        "  --desktop-only   (or MONDAY_DESKTOP_ONLY=1)",
       ].join("\n"),
     );
   }
 
   return {
     token,
+    desktopOnly,
+    accountSlug: (options.accountSlug ?? env.MONDAY_ACCOUNT_SLUG)?.trim() || undefined,
+    debugPort: parseInteger(options.debugPort ?? env.MONDAY_DEBUG_PORT, 9_222),
     apiUrl: options.apiUrl ?? env.MONDAY_API_URL ?? DEFAULT_API_URL,
     apiVersion: options.apiVersion ?? env.MONDAY_API_VERSION ?? DEFAULT_API_VERSION,
     readOnly: options.readOnly ?? parseBool(env.MONDAY_READ_ONLY),

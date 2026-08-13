@@ -240,6 +240,20 @@ stays but refuses any mutation. If a board allow list is set, `monday_graphql` i
 registered at all, because a raw document cannot honour the list — so read-only **and**
 an allow list together leave just the eight read tools.
 
+Three more tools address and drive the other modes. They register in **every** mode,
+including with no token at all:
+
+| Tool | What it does |
+| --- | --- |
+| `monday_resolve_location` | Turns ids into the URL that addresses them, plus the `group_id` / `column_id` no URL can carry. Resolve once, dispatch to any mode. |
+| `monday_open` | Navigates the desktop app to a location over its debug port. `mode: "chrome"` returns the URL and the working recipe instead, because this server cannot reach your browser. |
+| `monday_ui_action` | `read_card` reads an item card; `post_update` posts on it. Both drive real DOM in the desktop app. |
+
+`monday_ui_action` drops `post_update` in read-only mode, so the tool is genuinely
+read-only rather than accepting a write and refusing it later. Board **grid cells are
+not reachable by any of these** — the grid is a canvas, not DOM. Switching a board view
+and running the Excel export are not implemented.
+
 ### Column values
 
 Pass `values` keyed by column id or column title. Use the plain form below.
@@ -310,10 +324,28 @@ redacts it before anything leaves the process.
 | `--boards` | `MONDAY_ALLOWED_BOARDS` | all boards |
 | `--api-version` | `MONDAY_API_VERSION` | `2026-07` |
 | `--api-url` | `MONDAY_API_URL` | `https://api.monday.com/v2` |
+| `--desktop-only` | `MONDAY_DESKTOP_ONLY` | off |
+| `--account-slug` | `MONDAY_ACCOUNT_SLUG` | read from the token |
+| `--debug-port` | `MONDAY_DEBUG_PORT` | `9222` |
 | | `MONDAY_TIMEOUT_MS` | `30000` |
 | | `MONDAY_MAX_RETRIES` | `3` |
 
 A flag always wins over the matching environment variable.
+
+**Running without a token.** `--desktop-only` starts the server with no token: the
+fifteen API tools are absent and only the three addressing tools load, riding the
+session already signed in to the desktop app. It must be asked for explicitly — a
+missing token is otherwise still a hard failure, so a typo in `MONDAY_API_TOKEN` fails
+loudly instead of quietly booting a server that cannot see your data.
+
+```bash
+claude mcp add monday-desktop -- node /full/path/to/monday-mcp/dist/index.js \
+  --desktop-only --account-slug <your-slug>
+```
+
+`--account-slug` matters here: every monday.com URL needs the account subdomain, and
+without a token there is nothing to read it from. `monday_resolve_location` fails with
+a clear message rather than emitting a slug-less URL, which would 404.
 
 **About the API version.** monday.com retires an API version every quarter, and a
 request that names a retired version quietly gets the maintenance version instead. That
@@ -380,6 +412,27 @@ Notes learned while building this: a cold `Page.navigate` to `/boards/<id>/pulse
 document‑idle; poll for an element instead); `Page.navigate` destroys the JS execution
 context, so re‑evaluate after navigating. The board grid is a `<canvas>` (see Mode 2), so
 individual cells aren't DOM‑selectable — reach a cell through the item card or the API.
+
+Four more, all found by driving a real board and all now handled in `src/desktop.ts`:
+
+- **Widen the viewport before you touch the card.** The item card is a right‑anchored
+  panel that extends past the window: its submit control measured **x=1813 in a 1360px
+  viewport**, so a pointer event at its coordinates hits nothing and
+  `elementFromPoint` returns `null`. `Emulation.setDeviceMetricsOverride` to ~2400×1400
+  before navigating pulls it into reach. Clear the override afterwards.
+- **The update composer is NOT inside `[role="dialog"]`** — it renders in its own
+  micro‑frontend subtree (`new-post-update-MfExternalComponent`). Scoping selectors to
+  the dialog finds nothing.
+- **`document.execCommand("insertText")` does not drive the editor's model.** Use CDP
+  `Input.insertText` so the rich‑text editor actually registers the content; otherwise
+  the text appears in the DOM and the Update control stays inert.
+- **The submit control is a `DIV`**, `[data-testid="post-editor-update-button"]`, so a
+  `querySelectorAll("button")` sweep never sees it.
+
+And two traps when verifying a post: take the baseline post count only **after** the
+thread settles (counting straight after navigation reads 0, and the existing posts
+arriving late then look like success), and confirm by **content**, not count. Unsent
+text also accumulates in the composer and survives an app relaunch — clear it first.
 
 ---
 
@@ -458,6 +511,13 @@ The tests run the real MCP server against a fake monday.com API over an
 in-memory transport. They assert the exact JSON that goes over the wire.
 `test/regressions.test.ts` holds one test per defect found so far, named
 after the behaviour that was wrong.
+
+**Two CDP clients exist, on purpose.** `scripts/cdp-desktop.mjs` is the standalone
+CLI documented in [Mode 1](#mode-1--the-desktop-app-over-cdp-no-api-token).
+`src/desktop.ts` is its in-package twin, used by `monday_open` and
+`monday_ui_action`. The logic is duplicated because `scripts/` is not in
+package.json `files`, so a published install cannot reach it. Change one and you
+almost certainly need to change the other.
 
 ---
 

@@ -31,6 +31,8 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     allowedBoards: new Set<string>(),
     timeoutMs: 5_000,
     maxRetries: 0,
+    desktopOnly: false,
+    debugPort: 9_222,
     ...overrides,
   };
 }
@@ -181,17 +183,27 @@ describe("tool counts the README states", () => {
       list.tools.map((tool) => tool.name).sort(),
     );
 
-  it("registers 15 tools normally and 9 in read-only mode", async () => {
-    expect(await namesFor(makeConfig())).toHaveLength(15);
+  // 15 API tools, plus the 3 addressing/desktop tools that load in every mode.
+  it("registers 18 tools normally and 12 in read-only mode", async () => {
+    expect(await namesFor(makeConfig())).toHaveLength(18);
     const readOnly = await namesFor(makeConfig({ readOnly: true }));
-    expect(readOnly).toHaveLength(9);
+    expect(readOnly).toHaveLength(12);
     expect(readOnly).toContain("monday_graphql");
   });
 
   it("drops only monday_graphql when a board allow list is set", async () => {
     const limited = await namesFor(makeConfig({ allowedBoards: new Set(["1"]) }));
-    expect(limited).toHaveLength(14);
+    expect(limited).toHaveLength(17);
     expect(limited).not.toContain("monday_graphql");
+  });
+
+  it("registers only the addressing tools when there is no token", async () => {
+    const names = await namesFor(makeConfig({ token: "", desktopOnly: true }));
+    expect(names).toEqual([
+      "monday_open",
+      "monday_resolve_location",
+      "monday_ui_action",
+    ]);
   });
 });
 

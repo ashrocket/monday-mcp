@@ -15,6 +15,8 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     allowedBoards: new Set<string>(),
     timeoutMs: 5_000,
     maxRetries: 0,
+    desktopOnly: false,
+    debugPort: 9_222,
     ...overrides,
   };
 }
@@ -60,6 +62,9 @@ describe("tool registration", () => {
       "monday_list_users",
       "monday_list_workspaces",
       "monday_move_item",
+      "monday_open",
+      "monday_resolve_location",
+      "monday_ui_action",
       "monday_update_item",
     ]);
   });
