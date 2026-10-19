@@ -1,0 +1,44 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>monday-mcp cover</title>
+<link rel="stylesheet" href="../../tokens.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: var(--paper); width: 960px; height: 288px; overflow: hidden; }
+  svg { display: block; }
+  .block-teal { fill: var(--cable-teal); }
+  .block-ink { fill: var(--ink); }
+  .block-orange { fill: var(--patch-orange); }
+  .jack { fill: var(--paper); }
+  .name { fill: var(--ink); }
+  .tagline { fill: var(--muted); }
+</style>
+</head>
+<body>
+<svg width="960" height="288" viewBox="0 0 960 288" role="img" aria-label="monday-mcp. A local MCP server for monday.com. Unofficial.">
+  <!-- Derivation: three solid blocks from the brief colours, cable-teal, ink and patch-orange, covering 45 percent of the cover, all right of x 480.
+       Arrangement: one tall teal column at x 480 to 680, and two stacked blocks at x 680 to 960 (ink above, orange below), like two jacks in a patch bay.
+       Pattern: pills (patch-bay jacks in rows) with radius half the short side (7 of 14), from the brief. Paper fill shows only on the blocks.
+       Steps and radii: display step 64/68 px for the name, small step 14 px for the tagline, radius-pill token, space-4 (40 px) margin. -->
+  <defs>
+    <pattern id="jacks" width="48" height="36" patternUnits="userSpaceOnUse">
+      <rect class="jack" x="10" y="11" width="28" height="14" rx="7" ry="7"/>
+    </pattern>
+  </defs>
+
+  <rect class="block-teal" x="480" y="0" width="200" height="288"/>
+  <rect class="block-ink" x="680" y="0" width="280" height="120"/>
+  <rect class="block-orange" x="680" y="168" width="280" height="120"/>
+
+  <rect x="480" y="0" width="480" height="288" fill="url(#jacks)"/>
+
+  <text class="name display" x="40" y="186">monday-mcp</text>
+  <text class="tagline small" x="40" y="226">A local MCP server for monday.com. Unofficial.</text>
+</svg>
+</body>
+</html>

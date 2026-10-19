@@ -1,0 +1,27 @@
+/* monday-mcp design system — generated from tokens.json */
+:root, [data-theme="light"] {
+  --paper: #f5f6f8;
+  --ink: #1d2433;
+  --cable-teal: #1f6f78;
+  --patch-orange: #d9661f;
+  --orange-ink: #9c4310;
+  --muted: #5b6474;
+  --rule: #d5d9e0;
+}
+:root {
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 40px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-pill: 999px;
+  --font-sans: "Schibsted Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+.display { font-family: var(--font-sans); font-size: 64px; line-height: 68px; font-weight: 700; }
+.heading { font-family: var(--font-sans); font-size: 28px; line-height: 34px; font-weight: 700; }
+.body { font-family: var(--font-sans); font-size: 18px; line-height: 28px; font-weight: 400; }
+.small { font-family: var(--font-sans); font-size: 14px; line-height: 22px; font-weight: 400; }
+.wordmark { font-family: var(--font-sans); font-size: 22px; line-height: 26px; font-weight: 700; }
+.command { font-family: var(--font-mono); font-size: 15px; line-height: 22px; font-weight: 400; }

@@ -1,0 +1,32 @@
+{
+  "project": "monday-mcp",
+  "what": "An unofficial local MCP server for monday.com. It runs on the user's machine, talks to the monday.com GraphQL API, and keeps the token local. Its README also maps two browser-based access modes.",
+  "audience": "Developers and AI agent users who connect MCP clients such as Claude or Cursor to monday.com.",
+  "landing_job": "None. The repo has no landing page. The README at README.md:1 is the only front door, and it explains install and the three access modes.",
+  "surfaces": [
+    {"kind": "cli", "where": "package.json:11-12 (bin monday-mcp -> dist/index.js)"},
+    {"kind": "api", "where": "src/config.ts:39 (DEFAULT_API_URL https://api.monday.com/v2)"}
+  ],
+  "public_url": "",
+  "brand_family": "",
+  "logo_files": [],
+  "existing_ds": {
+    "paths": [],
+    "has_readme_brandbook": false,
+    "has_tokens": false,
+    "has_cover_or_specimen": false,
+    "has_hero_pattern": false,
+    "has_logo_rules": false,
+    "published_artifact": ""
+  },
+  "identity": {
+    "coherent": false,
+    "palette": [],
+    "type": [],
+    "look": "No visual identity. The repo holds no CSS, HTML, fonts, logo or design tokens. Its only colour values are test fixture data at test/fake-monday.ts:23-24, which are not brand colours."
+  },
+  "design_system_dir_conflict": "",
+  "classification": "new_needed",
+  "v2_case": "",
+  "notes": "CLI and API server with no visual surface. Search covered README, AGENTS.md (absent), CONTRIBUTING.md and all source. No claude.ai artifact or design URL found. The package homepage is a GitHub repo, not a live site, so public_url is empty. Evidence digest found 29 scanned files and no design files."
+}

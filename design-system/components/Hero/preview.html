@@ -1,0 +1,165 @@
+<!-- @dsCard group="Landing" height=520 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>monday-mcp hero</title>
+<link rel="stylesheet" href="../../tokens.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&family=Schibsted+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+  }
+  .wrap {
+    box-sizing: border-box;
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: var(--space-2);
+  }
+  @media (min-width: 720px) { .wrap { padding: var(--space-4); } }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--rule);
+  }
+  .wordmark-link { color: var(--ink); text-decoration: none; }
+
+  .hero {
+    display: grid;
+    gap: var(--space-4);
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+    padding-top: var(--space-4);
+  }
+  .hero > section { min-width: 0; }
+  @media (min-width: 860px) { .hero { grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); } }
+
+  h1 {
+    margin: 0;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .promise { margin: var(--space-2) 0 0; max-width: 34ch; }
+  .promise strong { font-weight: 700; }
+  .detail { margin: var(--space-2) 0 0; color: var(--muted); max-width: 40ch; }
+
+  .action {
+    display: inline-block;
+    margin-top: var(--space-3);
+    padding: 8px 24px;
+    border-radius: var(--radius-pill);
+    background: var(--cable-teal);
+    color: var(--paper);
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .cmd {
+    box-sizing: border-box;
+    max-width: 100%;
+    margin-top: var(--space-3);
+    padding: var(--space-2);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-sm);
+    overflow-wrap: anywhere;
+  }
+  .cmd .prompt { color: var(--muted); }
+  .cmd code { font-family: inherit; display: block; }
+
+  /* Cable diagram: client -> monday-mcp -> api.monday.com */
+  .cable { display: flex; flex-direction: column; align-items: stretch; gap: 0; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+  .jack {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    border: 2px solid var(--ink);
+    border-radius: var(--radius-pill);
+    background: var(--paper);
+    padding: 12px 28px;
+    text-align: center;
+  }
+  .jack small { display: block; color: var(--muted); }
+  .jack::before, .jack::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 12px;
+    height: 12px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: var(--patch-orange);
+  }
+  .jack::before { left: 6px; }
+  .jack::after { right: 6px; }
+  .jack.hub { background: var(--ink); color: var(--paper); }
+  .jack.hub small { color: var(--paper); }
+  .seg {
+    align-self: center;
+    width: 2px;
+    height: var(--space-3);
+    background: var(--ink);
+    position: relative;
+  }
+  .seg span {
+    position: absolute;
+    left: 12px;
+    top: 2px;
+    white-space: nowrap;
+    color: var(--muted);
+  }
+
+  .notice {
+    margin: var(--space-4) 0 0;
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--rule);
+    color: var(--orange-ink);
+    box-sizing: border-box;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  .notice span { color: var(--muted); }
+</style>
+</head>
+<body class="body">
+<div class="wrap">
+  <header class="bar">
+    <a class="wordmark-link wordmark" href="#">monday-mcp</a>
+    <span class="small" style="color: var(--muted);">MIT licence</span>
+  </header>
+
+  <main class="hero">
+    <section>
+      <h1 class="display">monday-mcp</h1>
+      <p class="promise body">A local MCP server for monday.com. Your API token stays on your machine.</p>
+      <p class="detail small">It runs on your machine and speaks straight to the monday.com GraphQL API. No relay, no hosted middle layer, no telemetry.</p>
+      <a class="action" href="#setup">Read the setup</a>
+      <div class="cmd command" id="setup"><code><span class="prompt">$ </span>cd monday-mcp</code><code><span class="prompt">$ </span>npm install</code></div>
+    </section>
+
+    <section aria-label="How the cable connects">
+      <div class="cable">
+        <div class="jack small">Claude, Cursor or any MCP client</div>
+        <div class="seg"><span class="command">stdio</span></div>
+        <div class="jack hub small"><span class="wordmark">monday-mcp</span><small class="small">this server, on your machine</small></div>
+        <div class="seg"><span class="command">HTTPS</span></div>
+        <div class="jack small">api.monday.com<small class="small">monday.com GraphQL API</small></div>
+      </div>
+    </section>
+  </main>
+
+  <p class="notice small">Unofficial. Not affiliated with monday.com. <span>"monday.com" is a trademark of monday.com Ltd.</span></p>
+</div>
+</body>
+</html>

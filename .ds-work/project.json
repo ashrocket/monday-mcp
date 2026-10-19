@@ -1,0 +1,8 @@
+{
+ "n": "monday-mcp",
+ "target": "design-system",
+ "mode": "new",
+ "brief": "Concept: a patch bay (an MCP server is a cable between an agent and monday.com). It is UNOFFICIAL: never use monday.com's logo, purple or its coloured dots; say \"Unofficial. Not affiliated with monday.com.\" in README and Hero. Colours: paper #f5f6f8 (ground), ink #1d2433, cable-teal #1f6f78, patch-orange #d9661f (non-text), orange-ink #9c4310, muted #5b6474, rule #d5d9e0. Type: \"Schibsted Grotesk\" 700 display and 400 body, \"JetBrains Mono\" for commands. Wordmark: \"monday-mcp\" lowercase Schibsted Grotesk 700. Cover pattern: pills - patch-bay jacks in rows, radius = half the short side. Hero: name, \"A local MCP server for monday.com. Your API token stays on your machine.\" (adjust to README facts), action \"Read the setup\".",
+ "ruling": "",
+ "defects": []
+}
