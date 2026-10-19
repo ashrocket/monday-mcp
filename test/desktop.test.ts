@@ -16,15 +16,20 @@ describe("desktopRuntimeProblem", () => {
 });
 
 describe("desktopTargets", () => {
+  const supportsDesktop =
+    typeof (globalThis as { WebSocket?: unknown }).WebSocket !== "undefined";
+
   // Port 1 is privileged and never serves a debug endpoint.
-  it("explains how to start the app when nothing is listening", async () => {
+  it("explains the runtime requirement or how to start the app", async () => {
     await expect(desktopTargets({ port: 1 })).rejects.toThrow(DesktopError);
     await expect(desktopTargets({ port: 1 })).rejects.toThrow(
-      /--remote-debugging-port/,
+      supportsDesktop ? /--remote-debugging-port/ : /Node 22 or newer/,
     );
   });
 
-  it("names the port it tried", async () => {
-    await expect(desktopTargets({ port: 1 })).rejects.toThrow(/localhost:1/);
+  it("names the port on supported runtimes or explains the runtime requirement", async () => {
+    await expect(desktopTargets({ port: 1 })).rejects.toThrow(
+      supportsDesktop ? /localhost:1/ : /Node 22 or newer/,
+    );
   });
 });
