@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+  workflow_dispatch:
 
 # Read-only by default. Nothing here needs to write to the repository.
 permissions:
@@ -25,11 +27,23 @@ jobs:
             os: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test change scoping
+        run: node --test .github/ci/tests/scope.test.mjs
+      - name: Determine package scope
+        id: scope
+        run: node .github/ci/scope.mjs
       - uses: actions/setup-node@v4
+        if: steps.scope.outputs.full != 'false'
         with:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+        if: steps.scope.outputs.full != 'false'
       - run: npm run typecheck
+        if: steps.scope.outputs.full != 'false'
       - run: npm test
+        if: steps.scope.outputs.full != 'false'
       - run: npm run build
+        if: steps.scope.outputs.full != 'false'
