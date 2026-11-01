@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MondayApiError } from "../client.js";
 import { CREATE_UPDATE, GET_ITEM_UPDATES } from "../graphql.js";
 import { guard, ok } from "../format.js";
 import type { ToolContext } from "./context.js";
@@ -24,13 +25,20 @@ export function registerUpdateTools({ server, client, schemas }: ToolContext): v
       guard(async () => {
         if (client.allowedBoards.size > 0) await schemas.boardIdForItem(item_id);
         const data = await client.query<{
-          items: { id: string; name: string; updates: Record<string, unknown>[] }[];
+          items: { id: string; name: string; board?: { id: string } | null; updates: Record<string, unknown>[] }[];
         }>(
           GET_ITEM_UPDATES,
           { ids: [item_id], limit: limit ?? 25 },
           { label: "monday_list_updates" },
         );
         const item = data.items?.[0];
+        if ((data.items?.length ?? 0) > 1 || (item && String(item.id) !== item_id)) {
+          throw new MondayApiError("The API returned updates for an unexpected item.");
+        }
+        if (item && client.allowedBoards.size > 0) {
+          if (!item.board?.id) throw new MondayApiError("Cannot verify the board for the returned updates.");
+          client.assertBoardAllowed(item.board.id);
+        }
         return ok({
           item: item ? { id: item.id, name: item.name } : null,
           updates: item?.updates ?? [],

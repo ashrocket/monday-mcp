@@ -20,7 +20,7 @@ import {
   MOVE_ITEM_TO_GROUP,
   NEXT_ITEMS_PAGE,
 } from "../graphql.js";
-import { compactItem, detailedItem, guard, ok } from "../format.js";
+import { compactItem, detailedItem, fail, guard, ok } from "../format.js";
 import type { RawItem } from "../format.js";
 import type { ToolContext } from "./context.js";
 
@@ -187,6 +187,18 @@ export function registerItemTools(context: ToolContext): void {
             next_items_page: { cursor: string | null; items: RawItem[] };
           }>(NEXT_ITEMS_PAGE, { cursor, limit: pageSize }, { label: "monday_list_items" });
           const page = data.next_items_page;
+          // A cursor is opaque and next_items_page has no board_id argument.
+          // Verify the returned page before exposing any item or next cursor.
+          for (const item of page?.items ?? []) {
+            const actualBoard = item.board?.id;
+            if (!actualBoard || String(actualBoard) !== board_id) {
+              throw new MondayApiError(
+                "The cursor returned an item outside the requested board, or without board membership. " +
+                  "Start again without a cursor on the requested board.",
+              );
+            }
+            client.assertBoardAllowed(actualBoard);
+          }
           return ok({
             items: (page?.items ?? []).map(compactItem),
             cursor: page?.cursor ?? null,
@@ -258,9 +270,6 @@ export function registerItemTools(context: ToolContext): void {
     },
     async ({ item_ids }) =>
       guard(async () => {
-        if (client.allowedBoards.size > 0) {
-          for (const id of item_ids) await schemas.boardIdForItem(id);
-        }
         const wanted = [...new Set(item_ids)];
         const data = await client.query<{ items: RawItem[] }>(
           GET_ITEMS,
@@ -274,6 +283,14 @@ export function registerItemTools(context: ToolContext): void {
           throw new MondayApiError(
             `No item found for ${wanted.join(", ")}. Check the ids, or the token may not see the board.`,
           );
+        }
+        if (client.allowedBoards.size > 0) {
+          for (const item of items) {
+            if (!item.board?.id) {
+              throw new MondayApiError("Cannot verify the board for a returned item.");
+            }
+            client.assertBoardAllowed(item.board.id);
+          }
         }
         const returned = new Set(items.map((item) => String(item.id)));
         const missing = wanted.filter((id) => !returned.has(id));
@@ -393,6 +410,16 @@ export function registerItemTools(context: ToolContext): void {
         }
         const boardId = realBoardId;
         const result: Record<string, unknown> = { item_id, board_id: boardId };
+        // Schema lookup, value validation, and serialization can fail locally.
+        // Finish them before applying a rename or any other mutation.
+        const columnValues = values
+          ? buildColumnValues(
+              (await schemas.get(boardId)).columns,
+              values,
+              create_labels_if_missing ?? false,
+            )
+          : undefined;
+        const serializedValues = columnValues ? JSON.stringify(columnValues) : undefined;
 
         if (name !== undefined) {
           const renamed = await client.query<{ change_simple_column_value: unknown }>(
@@ -403,14 +430,10 @@ export function registerItemTools(context: ToolContext): void {
           result.renamed = renamed.change_simple_column_value;
         }
 
-        if (values) {
-          const board = await schemas.get(boardId);
-          const columnValues = buildColumnValues(
-            board.columns,
-            values,
-            create_labels_if_missing ?? false,
-          );
-          try {
+        let valuesStatus: "not_requested" | "unknown" | "applied" = "not_requested";
+        try {
+          if (columnValues) {
+            valuesStatus = "unknown";
             const changed = await client.query<{
               change_multiple_column_values: RawItem;
             }>(
@@ -418,25 +441,33 @@ export function registerItemTools(context: ToolContext): void {
               {
                 boardId,
                 itemId: item_id,
-                columnValues: JSON.stringify(columnValues),
+                columnValues: serializedValues,
                 createLabels: create_labels_if_missing ?? false,
               },
               { label: "monday_update_item" },
             );
             result.sent_column_values = columnValues;
             result.item = detailedItem(changed.change_multiple_column_values);
-          } catch (error) {
-            // The rename may already have gone through. Saying "failed" alone
-            // would invite the caller to redo work that is already done.
-            const note =
-              name !== undefined
-                ? ` The rename to "${name}" DID succeed and does not need repeating.`
-                : "";
-            throw new MondayApiError(`${(error as Error).message}${note}`, { cause: error });
+            valuesStatus = "applied";
           }
+          return ok(result);
+        } catch (error) {
+          if (name === undefined) throw error;
+          const guidance = `The rename to "${name}" DID succeed and does not need repeating. ` +
+            `Check the current column values on item ${item_id} before retrying any column changes.`;
+          return {
+            ...fail(`${(error as Error).message} ${guidance}`),
+            structuredContent: {
+              status: "partial_success",
+              item_id,
+              board_id: boardId,
+              renamed: { name, result: result.renamed },
+              column_values_status: valuesStatus,
+              error: (error as Error).message,
+              guidance,
+            },
+          };
         }
-
-        return ok(result);
       }),
   );
 
@@ -495,24 +526,43 @@ export function registerItemTools(context: ToolContext): void {
           { label: "monday_create_subitem" },
         );
         const subitem = created.create_subitem;
-        if (!values) return ok({ created: subitem });
-
-        // The subitem board is monday.com's own hidden board. It can never
-        // appear in a user supplied allow list, so it is trusted by way of
-        // the parent item, which was checked above.
-        const subBoard = await schemas.get(subitem.board.id, true, true);
-        const columnValues = buildColumnValues(subBoard.columns, values);
-        await client.query(
-          CHANGE_COLUMN_VALUES,
-          {
-            boardId: subitem.board.id,
-            itemId: subitem.id,
-            columnValues: JSON.stringify(columnValues),
-            createLabels: false,
-          },
-          { label: "monday_create_subitem (values)" },
-        );
-        return ok({ created: subitem, sent_column_values: columnValues });
+        let valuesStatus: "not_applied" | "unknown" | "applied" = "not_applied";
+        try {
+          if (!values) return ok({ created: subitem });
+          // The hidden subitem board is trusted through the checked parent.
+          const subBoard = await schemas.get(subitem.board.id, true, true);
+          const columnValues = buildColumnValues(subBoard.columns, values);
+          const serializedValues = JSON.stringify(columnValues);
+          valuesStatus = "unknown";
+          await client.query(
+            CHANGE_COLUMN_VALUES,
+            {
+              boardId: subitem.board.id,
+              itemId: subitem.id,
+              columnValues: serializedValues,
+              createLabels: false,
+            },
+            { label: "monday_create_subitem (values)" },
+          );
+          valuesStatus = "applied";
+          return ok({ created: subitem, sent_column_values: columnValues });
+        } catch (error) {
+          // Creation was acknowledged before any of these steps ran. Preserve
+          // that receipt even if schema lookup, validation, or the write fails.
+          const guidance = `Subitem ${subitem.id} was created successfully. Do not recreate it. ` +
+            "Check its current column values before retrying column changes.";
+          return {
+            ...fail(`${(error as Error).message} ${guidance}`),
+            structuredContent: {
+              status: "partial_success",
+              created: subitem,
+              parent_item_id,
+              column_values_status: valuesStatus,
+              error: (error as Error).message,
+              guidance,
+            },
+          };
+        }
       }),
   );
 

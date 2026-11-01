@@ -1,4 +1,5 @@
 import type { Config } from "./config.js";
+import { documentOperation } from "./operation.js";
 
 /** A GraphQL error as monday.com returns it. */
 export interface GraphQLError {
@@ -141,13 +142,31 @@ export class MondayClient {
     variables: Record<string, unknown> = {},
     options: QueryOptions = {},
   ): Promise<T> {
-    const maxRetries = options.maxRetries ?? this.config.maxRetries;
+    const operation = documentOperation(document);
+    if (operation === "mutation") this.assertWritable("run a mutation");
+    // A failed response does not establish whether a mutation committed.
+    // Replaying it can duplicate items, updates, or other side effects.
+    const maxRetries = operation === "mutation"
+      ? 0
+      : (options.maxRetries ?? this.config.maxRetries);
     const startedAt = this.now();
     let lastError: MondayApiError | undefined;
+    let requestSent = false;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      const remainingMs = RETRY_DEADLINE_MS - (this.now() - startedAt);
+      // Recheck after sleeping: event-loop delays can consume the budget
+      // even when the originally planned backoff fitted within it.
+      if (remainingMs <= 0) {
+        lastError = new MondayApiError(
+          `The total request deadline of ${RETRY_DEADLINE_MS} ms was reached.`,
+          { cause: lastError, status: lastError?.status, errorCode: lastError?.errorCode, errors: lastError?.errors },
+        );
+        break;
+      }
       try {
-        return await this.attempt<T>(document, variables);
+        requestSent = true;
+        return await this.attempt<T>(document, variables, Math.min(this.config.timeoutMs, remainingMs));
       } catch (error) {
         const apiError =
           error instanceof MondayApiError
@@ -157,14 +176,22 @@ export class MondayClient {
               });
         lastError = apiError;
 
+        const elapsed = this.now() - startedAt;
+        if (elapsed >= RETRY_DEADLINE_MS) {
+          lastError = new MondayApiError(
+            `${apiError.message} The total request deadline of ${RETRY_DEADLINE_MS} ms was reached.`,
+            { status: apiError.status, errorCode: apiError.errorCode, errors: apiError.errors, cause: apiError },
+          );
+          break;
+        }
+
         if (attempt === maxRetries || !this.isRetryable(apiError)) break;
 
         const wait = this.backoffMs(apiError, attempt);
-        const elapsed = this.now() - startedAt;
         // A complexity window can be a full minute. Waiting three of them
         // outlasts every MCP client, so report instead and let the caller
         // decide to try again.
-        if (elapsed + wait > RETRY_DEADLINE_MS) {
+        if (elapsed + wait >= RETRY_DEADLINE_MS) {
           lastError = new MondayApiError(
             `${apiError.message} The server stopped retrying after ` +
               `${Math.round(elapsed / 1000)} seconds. Wait for the reset, then try again.`,
@@ -182,7 +209,10 @@ export class MondayClient {
     }
 
     const label = options.label ? `${options.label}: ` : "";
-    throw new MondayApiError(`${label}${lastError?.message ?? "unknown error"}`, {
+    const mutationNote = operation === "mutation" && requestSent
+      ? " The mutation was sent once and may have committed. Check the current state before manually retrying."
+      : "";
+    throw new MondayApiError(`${label}${lastError?.message ?? "unknown error"}${mutationNote}`, {
       status: lastError?.status,
       errorCode: lastError?.errorCode,
       errors: lastError?.errors,
@@ -212,11 +242,12 @@ export class MondayClient {
   private async attempt<T>(
     document: string,
     variables: Record<string, unknown>,
+    timeoutMs: number,
   ): Promise<T> {
     const controller = new AbortController();
     // The timer must cover reading the body as well. Clearing it as soon as
     // the headers arrive lets a stalled body hang the tool forever.
-    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       let response: Response;
@@ -235,7 +266,7 @@ export class MondayClient {
       } catch (error) {
         const reason =
           (error as Error).name === "AbortError"
-            ? `The request timed out after ${this.config.timeoutMs} ms.`
+            ? `The request timed out after ${timeoutMs} ms.`
             : `The request failed: ${(error as Error).message}`;
         throw new MondayApiError(redact(reason, this.config.token), { cause: error });
       }
@@ -246,7 +277,7 @@ export class MondayClient {
       } catch (error) {
         const reason =
           (error as Error).name === "AbortError"
-            ? `The response body timed out after ${this.config.timeoutMs} ms.`
+            ? `The response body timed out after ${timeoutMs} ms.`
             : `The response body could not be read: ${(error as Error).message}`;
         throw new MondayApiError(redact(reason, this.config.token), {
           status: response.status,
@@ -270,7 +301,7 @@ export class MondayClient {
       if (response.status === 401 || response.status === 403) {
         throw new MondayApiError(
           "The API rejected the token. Check MONDAY_API_TOKEN. " +
-            "A token from Developers > My access tokens works for your own user.",
+            "Find your personal token under Developers > API token > Show.",
           { status: response.status },
         );
       }

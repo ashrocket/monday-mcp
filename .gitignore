@@ -9,6 +9,8 @@ coverage/
 !.env.example
 *.token
 .monday-token
+*.storage-state.json
+.browser-state/
 .npmrc
 *.tgz
 

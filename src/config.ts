@@ -22,6 +22,11 @@ export interface Config {
   accountSlug?: string;
   /** Port that the desktop app's --remote-debugging-port opened. */
   debugPort: number;
+  /** Opt in to a private, headless browser owned by this MCP process. */
+  browser?: boolean;
+  browserState?: string;
+  browserExecutable?: string;
+  browserTimeoutMs?: number;
   /** GraphQL endpoint. Override only for a proxy or a test double. */
   apiUrl: string;
   /** API version header. monday.com pins behaviour to this date string. */
@@ -66,18 +71,25 @@ function readTokenFile(path: string): string {
 }
 
 function parseBoards(raw: string | undefined): Set<string> {
-  if (!raw) return new Set();
-  return new Set(
+  if (raw === undefined) return new Set();
+  const boards = new Set(
     raw
       .split(",")
       .map((id) => id.trim())
       .filter((id) => id.length > 0),
   );
+  if (!boards.size || [...boards].some((id) => !/^[0-9]+$/.test(id))) {
+    throw new ConfigError("The board allow list must contain numeric board ids; refusing an empty or malformed policy.");
+  }
+  return boards;
 }
 
 function parseBool(raw: string | undefined): boolean {
-  if (!raw) return false;
-  return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
+  if (raw === undefined) return false;
+  const value = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  throw new ConfigError("Boolean settings must be true/false, yes/no, on/off, or 1/0.");
 }
 
 function parseInteger(
@@ -100,6 +112,10 @@ export interface CliOptions {
   desktopOnly?: boolean;
   accountSlug?: string;
   debugPort?: string;
+  browser?: boolean;
+  browserOnly?: boolean;
+  browserState?: string;
+  browserExecutable?: string;
 }
 
 /**
@@ -141,6 +157,7 @@ export function parseArgs(argv: string[]): CliOptions {
         break;
       case "boards":
         options.allowedBoards = nextValue();
+        if (options.allowedBoards === undefined) throw new ConfigError("--boards needs a comma-separated list of board ids.");
         break;
       case "desktop-only":
         options.desktopOnly = inlineValue === undefined ? true : parseBool(inlineValue);
@@ -150,6 +167,20 @@ export function parseArgs(argv: string[]): CliOptions {
         break;
       case "debug-port":
         options.debugPort = nextValue();
+        break;
+      case "browser":
+        options.browser = inlineValue === undefined ? true : parseBool(inlineValue);
+        break;
+      case "browser-only":
+        options.browserOnly = inlineValue === undefined ? true : parseBool(inlineValue);
+        break;
+      case "browser-state":
+        options.browserState = nextValue();
+        if (!options.browserState) throw new ConfigError("--browser-state needs a private login-state file path.");
+        break;
+      case "browser-executable":
+        options.browserExecutable = nextValue();
+        if (!options.browserExecutable) throw new ConfigError("--browser-executable needs a browser binary path.");
         break;
       default:
         break;
@@ -167,13 +198,16 @@ export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): Config {
   const options = parseArgs(argv);
+  const browserOnly = options.browserOnly ?? parseBool(env.MONDAY_BROWSER_ONLY);
 
-  let token = options.token ?? env.MONDAY_API_TOKEN ?? "";
-  const tokenFile = options.tokenFile ?? env.MONDAY_API_TOKEN_FILE;
+  // Explicit browser-only policy must not inherit API authority or even read
+  // an inherited token file from the parent process.
+  let token = browserOnly ? "" : (options.token ?? env.MONDAY_API_TOKEN ?? "");
+  const tokenFile = browserOnly ? undefined : (options.tokenFile ?? env.MONDAY_API_TOKEN_FILE);
   if (!token && tokenFile) token = readTokenFile(tokenFile);
   token = token.trim();
 
-  const desktopOnly = options.desktopOnly ?? parseBool(env.MONDAY_DESKTOP_ONLY);
+  const desktopOnly = browserOnly || (options.desktopOnly ?? parseBool(env.MONDAY_DESKTOP_ONLY));
 
   // A missing token stays a hard failure unless desktop-only was asked for.
   // Otherwise a typo in MONDAY_API_TOKEN would quietly boot a server with no
@@ -204,6 +238,10 @@ export function loadConfig(
     desktopOnly,
     accountSlug: (options.accountSlug ?? env.MONDAY_ACCOUNT_SLUG)?.trim() || undefined,
     debugPort: parseInteger(options.debugPort ?? env.MONDAY_DEBUG_PORT, 9_222),
+    browser: browserOnly || (options.browser ?? parseBool(env.MONDAY_BROWSER)),
+    browserState: options.browserState ?? env.MONDAY_BROWSER_STATE,
+    browserExecutable: options.browserExecutable ?? env.MONDAY_BROWSER_EXECUTABLE,
+    browserTimeoutMs: Math.min(parseInteger(env.MONDAY_BROWSER_TIMEOUT_MS, 60_000), 120_000),
     apiUrl: options.apiUrl ?? env.MONDAY_API_URL ?? DEFAULT_API_URL,
     apiVersion: options.apiVersion ?? env.MONDAY_API_VERSION ?? DEFAULT_API_VERSION,
     readOnly: options.readOnly ?? parseBool(env.MONDAY_READ_ONLY),

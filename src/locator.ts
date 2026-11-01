@@ -80,6 +80,15 @@ export function resolveLocation(locator: MondayLocator): ResolvedLocation {
     );
   }
 
+  // IDs occupy path segments. Reject traversal, delimiters and encoded paths
+  // before a browser can normalize them into a different resource.
+  for (const field of ["board_id", "view_id", "item_id", "update_id", "doc_id", "workspace_id", "dashboard_id"] as const) {
+    const value = locator[field];
+    if (value !== undefined && !/^[a-zA-Z0-9_-]+$/.test(value)) {
+      throw new LocatorError(`${field} must be a single id, without URL delimiters or path traversal.`);
+    }
+  }
+
   const origin = `https://${slug}.monday.com`;
   const notes: string[] = [];
   const api_targets = {
