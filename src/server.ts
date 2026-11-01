@@ -43,8 +43,7 @@ monday.com data directly. Only these are available:
 
 The background browser uses an explicit private login-state file. The legacy
 desktop path needs an open debug port. Board restrictions disable both UI paths.
-Board grid cells are a canvas, not DOM, so no tool
-here can read a cell value. Ask the user for an API token if the task needs
+These UI tools do not expose board-grid cell values. Ask the user for an API token if the task needs
 board data, rather than trying to scrape it.
 `.trim();
 

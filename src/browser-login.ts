@@ -29,16 +29,31 @@ export async function browserLogin(config: Config): Promise<void> {
   const browser = await chromium.launch({headless:false,
     ...(config.browserExecutable ? {executablePath:config.browserExecutable} : {channel:"chrome"})});
   const input = createInterface({input:process.stdin,output:process.stderr});
+  const cancelled = new AbortController();
+  const windowClosed = () => cancelled.abort(new Error("The dedicated login window closed before login was saved. Run --browser-login again."));
+  const inputClosed = () => cancelled.abort(new Error("The login prompt closed before login was saved. Run --browser-login again."));
+  browser.on("disconnected",windowClosed);
+  input.on("close",inputClosed);
   try {
     const context = await browser.newContext();
     const page = await context.newPage();
+    page.on("close",windowClosed);
     await page.goto(target,{waitUntil:"domcontentloaded",timeout:60_000});
-    await input.question("Sign in yourself in this dedicated browser. Once your account is open, press Enter here to save its login state. ");
+    await page.bringToFront();
+    try {
+      await input.question("Sign in yourself in this dedicated browser. Once your account is open, press Enter here to save its login state. ", {signal:cancelled.signal});
+    } catch (error) {
+      if (cancelled.signal.aborted) throw cancelled.signal.reason;
+      throw error;
+    }
     const actual = new URL(page.url());
     if (actual.origin !== new URL(target).origin || /\/(login|auth|sso|sign[-_]?in)(\/|$)/i.test(actual.pathname)) {
       throw new Error("The requested account is not open. Login state was not saved.");
     }
     await saveBrowserState(config.browserState,await context.storageState({indexedDB:true}));
     process.stderr.write("Saved the private login-state file. A browser tool call still needs to verify that the session works.\n");
-  } finally { input.close(); await browser.close(); }
+  } finally {
+    browser.off("disconnected",windowClosed); input.off("close",inputClosed);
+    input.close(); await browser.close();
+  }
 }

@@ -45,8 +45,8 @@ handoff only returns a URL and instructions; monday-mcp does not control that
 browser.
 
 The browser and legacy desktop tools can open supported locations and read a
-bounded item-card snapshot. They do not expose board grid cells, which are
-canvas-rendered on the current board view. UI posting is disabled because
+bounded item-card snapshot. They do not expose board grid cells; rendering
+varies between board versions. UI posting is disabled because
 composer and draft behavior can cross item boundaries. Use the API's
 `monday_create_update` tool for comments.
 
