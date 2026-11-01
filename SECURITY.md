@@ -111,7 +111,7 @@ isolate monday.com limits.
 - Browser operation deadlines cancel active work. Shutting down Playwright may
   then take up to an additional 30 seconds while the browser is closed or
   stopped. This is a lifecycle bound, not a measured performance claim.
-- Browser snapshots are bounded and may be incomplete. The current board grid
-  is canvas-rendered, so its cells are not exposed by the item-card reader.
+- Browser snapshots are bounded and may be incomplete. The item-card reader
+  does not expose board-grid cells, regardless of the board's renderer.
 - Local tests and fake API fixtures do not establish that a saved login state
   is accepted by a live account or prove current account-specific UI behavior.

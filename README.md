@@ -263,8 +263,8 @@ including with no token at all:
 | `monday_open` | Opens a location in the configured background browser or desktop app. `mode: "chrome"` returns a URL and instructions for a separate browser tool. |
 | `monday_ui_action` | `read_card` returns a bounded snapshot from an item card. UI posting is disabled; use `monday_create_update` with an API token to post. |
 
-Board **grid cells are not reachable by these UI tools** — the grid is a canvas,
-not DOM. Item-card snapshots are bounded and may be incomplete. Switching a
+Board **grid cells are not exposed by these UI tools**. Item-card snapshots are
+bounded and may be incomplete. Switching a
 board view and running the Excel export are not implemented.
 
 ### Column values
@@ -461,10 +461,10 @@ It does not reuse a personal browser profile or remote-debugging port.
 for another browser tool. monday-mcp does not control that browser. A configured
 board allow list disables the integrated browser and desktop paths.
 
-The board grid has renderer-specific behavior documented in
-[`docs/interface-map.md`](docs/interface-map.md). On the current renderer, grid
-cells are painted on a canvas rather than exposed as DOM elements. UI snapshots
-are not a substitute for API data reads and are explicitly incomplete. UI
+Historical board-renderer behavior is documented in
+[`docs/interface-map.md`](docs/interface-map.md). Rendering varies across board
+versions; the implemented item-card reader does not expose grid cells. UI
+snapshots are not a substitute for API data reads and are explicitly incomplete. UI
 posting is unavailable; use the API tool for updates.
 
 ---
