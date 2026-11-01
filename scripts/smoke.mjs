@@ -87,7 +87,7 @@ async function call(client, name, args = {}) {
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [entry],
-  env: process.env,
+  env: { ...process.env, MONDAY_READ_ONLY: wantsWrite ? (process.env.MONDAY_READ_ONLY ?? "false") : "true" },
   stderr: "inherit",
 });
 const client = new Client({ name: "monday-mcp-smoke", version: "1.0.0" });
@@ -144,7 +144,7 @@ await step("monday_list_users", async () => {
   return `${result.users.length} of ${result.scanned} users on this page`;
 });
 
-await step("bad status is refused with the real labels", async () => {
+if (wantsWrite) await step("bad status is refused with the real labels", async () => {
   const statusColumn = board?.columns.find((column) => column.type === "status");
   if (!statusColumn) return "skipped, this board has no status column";
   const result = await client.callTool({

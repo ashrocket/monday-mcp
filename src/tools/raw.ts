@@ -1,19 +1,12 @@
 import { z } from "zod";
 import { MondayApiError } from "../client.js";
+import { documentOperation } from "../operation.js";
 import { guard, ok } from "../format.js";
 import type { ToolContext } from "./context.js";
 
-/**
- * True when the document contains a mutation. The check is deliberately
- * blunt, because a read-only server must never let one through.
- *
- * The GraphQL spec counts the comma as an ignored token, exactly like
- * whitespace, so `,mutation {...}` is a valid document. Any character that
- * cannot be part of a GraphQL name therefore has to count as a boundary.
- */
+/** Uses the same AST classification as the transport and retry guard. */
 export function looksLikeMutation(document: string): boolean {
-  const withoutComments = document.replace(/#[^\n]*/g, "");
-  return /(^|[^A-Za-z0-9_])mutation(?![A-Za-z0-9_])/i.test(withoutComments);
+  return documentOperation(document) === "mutation";
 }
 
 export function registerRawTool({ server, client }: ToolContext): void {

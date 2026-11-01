@@ -154,6 +154,7 @@ export class FakeMonday {
             {
               id: "555",
               name: "Ship the thing",
+              board: { id: "111" },
               updates: [
                 {
                   id: "u1",

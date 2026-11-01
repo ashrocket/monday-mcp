@@ -143,6 +143,7 @@ export const GET_ITEM_UPDATES = /* GraphQL */ `
     items(ids: $ids) {
       id
       name
+      board { id }
       updates(limit: $limit) {
         id
         body

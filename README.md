@@ -1,31 +1,40 @@
 # monday-mcp
 
 A local [Model Context Protocol](https://modelcontextprotocol.io) server for
-[monday.com](https://monday.com) — plus a documented, reverse‑engineered map of
-**three ways an agent can reach a monday.com location without any discovery spend**:
-the GraphQL API, the web app in a browser, and the native desktop app over the Chrome
-DevTools Protocol.
+[monday.com](https://monday.com), with direct GraphQL tools and optional local
+browser and desktop access.
 
-It runs on your machine and speaks straight to the monday.com GraphQL API. Your token
-stays on your machine. No relay, no hosted middle layer, no telemetry.
+It runs on your machine and speaks straight to the monday.com GraphQL API. You
+supply the token locally; the server sends it to the configured API endpoint.
+The connector adds no hosted relay or telemetry.
+
+The connector is free software under the MIT License; there is no license fee to
+use monday-mcp. A monday.com account, its plan features, API limits, and any
+applicable monday.com charges are separate. This does not make every monday.com
+plan free or remove its rate limits. See [LICENSE](LICENSE) and
+[`docs/architecture.md`](docs/architecture.md).
 
 > **Unofficial.** This project is not built by monday.com, and it carries no
 > endorsement from monday.com. "monday.com" is a trademark of monday.com Ltd.
 
 ```
-Claude, Cursor, or any MCP client
+Codex or any MCP client
         |  stdio
    monday-mcp  (this server, on your machine)
         |  HTTPS
    api.monday.com
 ```
 
+The server uses MCP over standard input/output between the client and the local
+process, then HTTPS GraphQL requests to monday.com. See the detailed
+[architecture and multi-agent diagrams](docs/architecture.md).
+
 ---
 
 ## Contents
 
 - [Why another monday.com server](#why-another-mondaycom-server)
-- [Three ways to reach monday.com](#three-ways-to-reach-mondaycom)
+- [Ways to reach monday.com](#ways-to-reach-mondaycom)
 - [The addressing model](#the-addressing-model)
 - [Mode 3 — the API server (start here)](#mode-3--the-api-server-start-here)
   - [Install](#install) · [Get a token](#get-an-api-token) · [Connect it](#connect-it) · [Prove it works](#prove-it-works)
@@ -79,26 +88,23 @@ Three more things this server does:
 
 ---
 
-## Three ways to reach monday.com
+## Ways to reach monday.com
 
-The API server (Mode 3) is the primary, complete, contract‑backed path. The other two
-exist for the roughly ten percent of tasks the API can't do — pure‑UI actions, visual
-verification, or working with **no API token at all** by riding a session you're already
-logged into. All three are documented in depth in **[`docs/interface-map.md`](docs/interface-map.md)**.
+The API is the data path. Optional browser and desktop paths support opening
+locations and reading a bounded item-card snapshot. They do not provide general
+board-cell access or UI posting. See [the interface map](docs/interface-map.md)
+for the separate historical investigation of monday.com's web surfaces.
 
-| | **Mode 3 — API** | **Mode 2 — Web app** | **Mode 1 — Desktop app** |
-|---|---|---|---|
-| Transport | `api.monday.com/v2` GraphQL | Chrome (local) or Cloudflare Browser Run (remote), driven by DOM/CDP | Electron webview over CDP (`--remote-debugging-port`) |
-| Needs an API token | **Yes** | No (rides your login) | No (rides your login) |
-| Reads/writes any column type | ✅ (with shape translation) | ⚠️ item‑card / canvas‑limited | ⚠️ same |
-| Address group / column | ✅ | group via DOM, column API‑only | same |
-| Visual verification | ❌ | ✅ | ✅ |
-| Works headless / on a server | ✅ | remote only | ❌ |
-| Best for | all data CRUD | UI‑only actions, screenshots, no‑token | desktop‑specific, no‑token |
+| Path | Connection | Capabilities |
+|---|---|---|
+| GraphQL API | Token from local environment or token file; HTTPS to monday.com | Supported data tools and raw GraphQL when policy permits |
+| Dedicated browser | Optional headless Chrome process with explicit saved login state | Open supported locations; read a bounded item-card snapshot |
+| Browser handoff | Another browser tool controlled by the client | Returns a URL and instructions; monday-mcp does not control that browser |
+| Desktop app | Optional local desktop app debug port | Open supported locations; read a bounded item-card snapshot |
 
-**Rule of thumb:** *data* → Mode 3; *pixels or UI‑only* → Mode 2 (local Chrome);
-*desktop‑specific or no token on a workstation* → Mode 1; *headless with no local Chrome*
-→ Mode 2 (Cloudflare Browser Run).
+Use the API for board data and mutations. Browser and desktop tools are limited
+to location navigation and item-card reading; posting updates is available
+through `monday_create_update` on the API path.
 
 ---
 
@@ -152,16 +158,22 @@ npm install          # this also builds, through the prepare script
 
 ### Get an API token
 
-1. Open monday.com.
-2. Click your avatar at the bottom left.
-3. Choose **Developers**, then **My access tokens**, then **Show**.
-4. Copy the token.
+1. Open monday.com and click your profile picture at the top right.
+2. Select **Developers**, then **API token > Show**.
+3. Copy your personal token.
 
-An admin may prefer the account token at **Administration > API**.
-
-The token carries your own permissions. It sees the boards you see.
+Account admins can also find their personal API token under
+**Administration > Connections > Personal API token**. Personal tokens mirror
+the user's monday.com permissions. See monday.com's current
+[authentication documentation](https://developer.monday.com/api-reference/docs/authentication).
 
 ### Connect it
+
+**Codex** — add a local MCP server in Codex's MCP server settings. Use `node`
+as the command and the absolute path to `dist/index.js` as its argument; provide
+`MONDAY_API_TOKEN` in that server's environment. The exact settings location
+depends on whether you use the Codex app or CLI; consult the MCP settings shown
+by your installed Codex version.
 
 **Claude Code**
 
@@ -213,7 +225,9 @@ npm run smoke             # read-only checks against your account
 npm run smoke -- --write  # adds a create, update, comment and archive cycle
 ```
 
-The write cycle archives the item that it makes, so it leaves no clutter.
+The default smoke test forces read-only mode. The optional write cycle creates
+real account data and attempts to archive its test item; inspect the result if
+any step fails.
 
 ### Tools
 
@@ -235,10 +249,10 @@ The write cycle archives the item that it makes, so it leaves no clutter.
 | `monday_list_workspaces` | List the workspaces. |
 | `monday_graphql` | An escape hatch for anything the other tools miss. |
 
-In read-only mode only the eight read tools register, plus `monday_graphql`, which
-stays but refuses any mutation. If a board allow list is set, `monday_graphql` is not
-registered at all, because a raw document cannot honour the list — so read-only **and**
-an allow list together leave just the eight read tools.
+In read-only mode the API read tools remain available, and `monday_graphql`
+accepts queries but refuses mutations. If a board allow list is set,
+`monday_graphql` is omitted because arbitrary documents cannot honor that list.
+Account-level tools may still return account metadata.
 
 Three more tools address and drive the other modes. They register in **every** mode,
 including with no token at all:
@@ -246,13 +260,12 @@ including with no token at all:
 | Tool | What it does |
 | --- | --- |
 | `monday_resolve_location` | Turns ids into the URL that addresses them, plus the `group_id` / `column_id` no URL can carry. Resolve once, dispatch to any mode. |
-| `monday_open` | Navigates the desktop app to a location over its debug port. `mode: "chrome"` returns the URL and the working recipe instead, because this server cannot reach your browser. |
-| `monday_ui_action` | `read_card` reads an item card; `post_update` posts on it. Both drive real DOM in the desktop app. |
+| `monday_open` | Opens a location in the configured background browser or desktop app. `mode: "chrome"` returns a URL and instructions for a separate browser tool. |
+| `monday_ui_action` | `read_card` returns a bounded snapshot from an item card. UI posting is disabled; use `monday_create_update` with an API token to post. |
 
-`monday_ui_action` drops `post_update` in read-only mode, so the tool is genuinely
-read-only rather than accepting a write and refusing it later. Board **grid cells are
-not reachable by any of these** — the grid is a canvas, not DOM. Switching a board view
-and running the Excel export are not implemented.
+Board **grid cells are not reachable by these UI tools** — the grid is a canvas,
+not DOM. Item-card snapshots are bounded and may be incomplete. Switching a
+board view and running the Excel export are not implemented.
 
 ### Column values
 
@@ -308,11 +321,12 @@ server does not expose.
 | Setting | Effect |
 | --- | --- |
 | `--read-only` or `MONDAY_READ_ONLY=1` | Only read tools get registered. A raw mutation is refused. |
-| `--boards 111,222` or `MONDAY_ALLOWED_BOARDS=111,222` | Every other board becomes invisible. `monday_graphql` is not registered at all, because a raw document cannot honour the list. |
+| `--boards 111,222` or `MONDAY_ALLOWED_BOARDS=111,222` | Board-scoped API tools enforce the list. Browser and desktop access are disabled because a signed-in UI session cannot enforce the list. Raw GraphQL is omitted. Account-level tools may still expose account metadata; this is not a tenant security boundary. |
 | `mode: "delete"` | Needs `confirm: true`. The default mode archives instead, which a person can undo. |
 
-The token never appears in a tool result or an error message. The client
-redacts it before anything leaves the process.
+The API client redacts the configured token from its API error text. Tool
+results can still contain account and board data returned by monday.com; treat
+that content as sensitive and untrusted.
 
 ### Options
 
@@ -325,6 +339,11 @@ redacts it before anything leaves the process.
 | `--api-version` | `MONDAY_API_VERSION` | `2026-07` |
 | `--api-url` | `MONDAY_API_URL` | `https://api.monday.com/v2` |
 | `--desktop-only` | `MONDAY_DESKTOP_ONLY` | off |
+| `--browser` | `MONDAY_BROWSER` | off |
+| `--browser-only` | `MONDAY_BROWSER_ONLY` | off |
+| `--browser-state` | `MONDAY_BROWSER_STATE` | none |
+| `--browser-executable` | `MONDAY_BROWSER_EXECUTABLE` | installed Chrome |
+| | `MONDAY_BROWSER_TIMEOUT_MS` | `60000` (maximum `120000`) |
 | `--account-slug` | `MONDAY_ACCOUNT_SLUG` | read from the token |
 | `--debug-port` | `MONDAY_DEBUG_PORT` | `9222` |
 | | `MONDAY_TIMEOUT_MS` | `30000` |
@@ -332,9 +351,50 @@ redacts it before anything leaves the process.
 
 A flag always wins over the matching environment variable.
 
-**Running without a token.** `--desktop-only` starts the server with no token: the
-fifteen API tools are absent and only the three addressing tools load, riding the
-session already signed in to the desktop app. It must be asked for explicitly — a
+Boolean environment values must be `true`/`false`, `yes`/`no`, `on`/`off`, or
+`1`/`0`; malformed values stop startup. If using `--boards` or
+`MONDAY_ALLOWED_BOARDS`, supply one or more numeric ids. Omit the setting for
+unrestricted board scope; an empty or malformed allow-list is rejected.
+
+### Dedicated browser setup
+
+The optional browser is a private headless Chrome process owned by one
+monday-mcp process. It does not attach to a personal Chrome profile or use a
+remote-debugging port. By default it launches installed Chrome; use
+`--browser-executable <path>` to select another compatible binary.
+
+Create a new login-state snapshot with an interactive login window. Choose a
+private absolute path outside the repository; the example below is under the
+user's config directory:
+
+```bash
+node dist/index.js --browser-login --account-slug <slug> --browser-state /Users/<your-user>/.config/monday/work.storage-state.json
+```
+
+Sign in yourself in the dedicated window and press Enter in the terminal when
+the account is open. The file is credential material: keep it private and do
+not commit or share it. The command requests owner-only permissions (`0600` on
+macOS/Linux) and refuses to replace an existing path. On Windows, protect the
+parent directory with account-specific access permissions. A successful save does not prove the
+session will still authenticate later; make a browser tool call to verify it.
+
+Enable browser tools alongside API tools with `--browser --browser-state
+<same-path>`. To run browser tools without an API token, use
+`--browser-only --account-slug <slug> --browser-state <same-path>`. Each MCP
+process owns one browser, context, and page. The page is reused while warm and
+operations are serialized, with at most 32 operations queued or active;
+each operation has a deadline. Browser targets are restricted to supported
+HTTPS monday.com account URLs, and the requested account and target are checked
+before results are returned. A board allow list disables browser and desktop
+access because a logged-in UI session cannot enforce board scoping.
+
+Cancellation closes the owned browser. Playwright can take up to an additional
+30 seconds to finish process cleanup after an operation deadline.
+
+**Running without an API token.** `--browser-only` starts the server without an
+API token and uses the dedicated browser state; `--desktop-only` uses the
+already signed-in desktop app. The API tools are absent. These modes must be
+asked for explicitly — a
 missing token is otherwise still a hard failure, so a typo in `MONDAY_API_TOKEN` fails
 loudly instead of quietly booting a server that cannot see your data.
 
@@ -356,145 +416,82 @@ when you upgrade.
 
 ### Rate limits
 
-monday.com meters a complexity budget, not a request count. The client reads
+monday.com applies complexity, daily call, concurrency, and other limits. The client reads
 the reset hint from the throttle response, whether it arrives in the
 `retry-after` header or in the message body, and waits for that long. Other
 transient failures use exponential backoff.
 
-Retrying stops after about 45 seconds in total. A complexity window can be a
-full minute, and waiting three of them outlasts every MCP client, so the
-server reports the throttle and lets the caller decide to try again.
+Only reads retry, for recognized transient and throttling failures, within the
+configured retry count and a total request deadline of 45 seconds. A
+complexity window can be a full minute, so the server reports the throttle and
+lets the caller decide to try again. Mutations never retry automatically: after
+a failed response, the server cannot know whether monday.com applied the
+change. Check current state before deciding whether to resubmit.
 
 Board layouts stay in a cache for one minute, which keeps a run of writes off
 the budget.
+
+See monday.com's [rate-limit documentation](https://developer.monday.com/api-reference/docs/rate-limits)
+for current account and plan limits. When a multi-step write partly succeeds,
+the tool returns an error with a structured receipt of the acknowledged changes.
+Use that receipt and read the current item before retrying.
 
 ---
 
 ## Mode 1 — the desktop app over CDP (no API token)
 
-The monday.com macOS desktop app is an Electron shell that hosts the web app in a
-`<webview>`. It registers **no** custom URL scheme (there is no `monday://`), but its
-Electron fuses leave remote debugging open — so you can attach a CDP client and drive the
-**real, already‑logged‑in web app with no API token**. This was verified end‑to‑end:
-launching with a debug port exposes a `webview` target already signed in, and a
-zero‑dependency Node client can navigate it and read the item‑card DOM.
-
-`scripts/cdp-desktop.mjs` is that client (uses Node's native `WebSocket`; Node ≥ 22, no
-`npm install`). Claude‑in‑Chrome **cannot** attach here — it pairs with the Chrome
-extension only — which is why a small CDP client is used instead.
-
-```bash
-# 1. Quit any running instance (single-instance lock ignores the flag otherwise)
-osascript -e 'quit app "monday.com"'
-
-# 2. Launch with the debug port (launch the binary directly; `open -a --args` is unreliable)
-/Applications/monday.com.app/Contents/MacOS/monday.com --remote-debugging-port=9222 &
-
-# 3. Drive it — no token, rides your session
-node scripts/cdp-desktop.mjs targets                          # list debug targets
-node scripts/cdp-desktop.mjs open <slug> <board_id> <item_id> # jump straight to an item card
-node scripts/cdp-desktop.mjs nav  '<url>'                      # any deep link
-node scripts/cdp-desktop.mjs eval '<js>'                       # read/drive the DOM
-node scripts/cdp-desktop.mjs shot out.png                      # screenshot the webview
-```
-
-> ⚠️ **Security — read before using.** `--remote-debugging-port` opens an **unauthenticated**
-> port on `localhost`. While it is open, *any* local process can read and drive your
-> logged‑in monday.com session — no password required. "Any local process" is broad: a
-> browser extension with a native messaging host, background dev tooling, or a malicious
-> `npm` postinstall script all qualify, and none of them need your credentials to act as
-> you in monday.com. Only run it when you want this, and **quit the app when done**
-> (`osascript -e 'quit app "monday.com"'`) to close the port. Launching also restarts the
-> app, losing any unsaved in‑app state.
-
-Notes learned while building this: a cold `Page.navigate` to `/boards/<id>/pulses/<item_id>`
-**does** open the item card (deep links only appear to "hang" under drivers that wait for
-document‑idle; poll for an element instead); `Page.navigate` destroys the JS execution
-context, so re‑evaluate after navigating. The board grid is a `<canvas>` (see Mode 2), so
-individual cells aren't DOM‑selectable — reach a cell through the item card or the API.
-
-Four more, all found by driving a real board and all now handled in `src/desktop.ts`:
-
-- **Widen the viewport before you touch the card.** The item card is a right‑anchored
-  panel that extends past the window: its submit control measured **x=1813 in a 1360px
-  viewport**, so a pointer event at its coordinates hits nothing and
-  `elementFromPoint` returns `null`. `Emulation.setDeviceMetricsOverride` to ~2400×1400
-  before navigating pulls it into reach. Clear the override afterwards.
-- **The update composer is NOT inside `[role="dialog"]`** — it renders in its own
-  micro‑frontend subtree (`new-post-update-MfExternalComponent`). Scoping selectors to
-  the dialog finds nothing.
-- **`document.execCommand("insertText")` does not drive the editor's model.** Use CDP
-  `Input.insertText` so the rich‑text editor actually registers the content; otherwise
-  the text appears in the DOM and the Update control stays inert.
-- **The submit control is a `DIV`**, `[data-testid="post-editor-update-button"]`, so a
-  `querySelectorAll("button")` sweep never sees it.
-
-And two traps when verifying a post: take the baseline post count only **after** the
-thread settles (counting straight after navigation reads 0, and the existing posts
-arriving late then look like success), and confirm by **content**, not count. Unsent
-text also accumulates in the composer and survives an app relaunch — clear it first.
+The legacy desktop path attaches to the monday.com desktop app over its local
+debug port. The port is unauthenticated and exposes the logged-in session to
+local processes while open; use this path only when needed and close the app
+afterward. Its UI tools open locations and read bounded item-card snapshots.
+UI posting is disabled because composer and draft behavior can cross item
+boundaries. To post, use `monday_create_update` through the API. A configured
+board allow list disables this desktop path.
 
 ---
 
 ## Mode 2 — the web app in a browser
 
-For UI‑only actions, screenshots, or working with no token. Two sub‑modes share the URL
-builder above.
+For opening a location or reading an item-card snapshot without API access, use
+the dedicated headless browser described in [Dedicated browser setup](#dedicated-browser-setup).
+The browser is owned by this MCP process and uses an explicit login-state file.
+It does not reuse a personal browser profile or remote-debugging port.
 
-**Local Chrome** (rides your existing login). Drive the DOM with a browser‑automation
-tool. Two gotchas, both verified live and documented in
-[`docs/interface-map.md`](docs/interface-map.md):
+**External browser handoff.** `monday_open` can return a URL and instructions
+for another browser tool. monday-mcp does not control that browser. A configured
+board allow list disables the integrated browser and desktop paths.
 
-- **The board grid is a `<canvas>`.** Item names, cell values, and status pills are painted,
-  not DOM — you cannot select a cell by selector on the current renderer. Reach a cell by
-  opening the item card (real DOM), by coordinate click, or via the API. There is also a
-  legacy DOM‑grid renderer still in the wild; detect which is active by checking whether a
-  known item name appears in `document.body.innerText`.
-- **Cold deep‑link navigation can stall** under idle‑waiting drivers; navigate to the account
-  root and click through in‑app, or use raw CDP and poll for a target element.
-
-App chrome, dialogs, menus, and the item card use monday's open‑source **Vibe** design
-system, which puts a stable `data-vibe="…"` (component type) and `data-testid` on every
-component root. Prefer `[data-vibe="Modal"]`, `role="dialog"`, `[data-testid="…"]`, and
-`data-group-id` over hashed CSS‑module class names. Selector conventions are catalogued in
-the interface map.
-
-**Remote — Cloudflare Browser Run.** For headless/server contexts, connect
-`playwright-core` / `puppeteer-core` over CDP to Browser Run (Chromium), persist login with
-Playwright `storageState`, and do first login via the Human‑in‑the‑Loop Live View handoff.
-
-> Cloudflare **KiteSurf** is CDP‑reachable but, per Cloudflare's own docs, **cannot hold an
-> authenticated session** — so it is unsuitable for a logged‑in monday.com. Use Browser Run's
-> default Chromium instead. All Cloudflare browsers egress from datacenter IPs flagged as bot
-> traffic, so logins may be challenged.
+The board grid has renderer-specific behavior documented in
+[`docs/interface-map.md`](docs/interface-map.md). On the current renderer, grid
+cells are painted on a canvas rather than exposed as DOM elements. UI snapshots
+are not a substitute for API data reads and are explicitly incomplete. UI
+posting is unavailable; use the API tool for updates.
 
 ---
 
 ## Security & privacy
 
-- **Your token stays local.** The API server talks straight to `api.monday.com` over HTTPS.
-  No relay, no telemetry. The token is redacted before anything leaves the process, and
-  never appears in a tool result or error.
+- **Credentials stay in local configuration.** The API token is sent to monday.com over
+  HTTPS. The optional browser state file contains login credentials and must be protected.
+  The connector does not add a hosted relay; tool results can include account data.
 - **Never commit a token.** `.env`, `*.token`, and friends are gitignored; only
   `.env.example` (a placeholder) is tracked.
-- **Read‑only and board‑allowlist** modes cap what the API server can touch (see
-  [Safety](#safety)).
-- **The desktop CDP debug port is unauthenticated** — see the boxed warning in
-  [Mode 1](#mode-1--the-desktop-app-over-cdp-no-api-token). Treat it as a temporary,
-  cons&#8288;ent‑gated handle and close it when done.
-- **Same‑origin authenticated `fetch` from a browser mode is intentionally out of scope** —
-  use the API for data.
+- **Read-only and board allow-list** modes constrain API tools. The allow list also disables
+  browser and desktop access, but account-level tools can still return metadata. These are
+  operational controls, not a tenant isolation boundary (see [Safety](#safety)).
+- **The desktop CDP debug port is unauthenticated** and exposes the signed-in session to
+  local processes while open. Close the desktop app when finished with that path.
+- Browser snapshots may contain private board content. Treat results as sensitive and
+  untrusted input.
 
 ---
 
 ## How this was mapped
 
-The three‑mode design and every URL/DOM/API detail come from first‑hand investigation, not
-guesswork, and each claim in [`docs/interface-map.md`](docs/interface-map.md) is tagged with
-how it was verified: live in a logged‑in browser, by decompiling the desktop app bundle, from
-official monday.com / Cloudflare docs, or from maintained third‑party integrations. The
-document also lists, verbatim, everything that could **not** be resolved, so the boundaries of
-what's known are explicit. Start there if you want to extend any mode.
+[`docs/interface-map.md`](docs/interface-map.md) records a historical investigation of
+monday.com URL, API, and UI behavior, with evidence labels and unresolved questions. Some
+browser findings describe earlier external-browser workflows; the implemented local browser
+contract is documented above and in [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
@@ -504,20 +501,26 @@ what's known are explicit. Start there if you want to extend any mode.
 npm test          # tests, no network
 npm run typecheck # source and tests
 npm run build
+npm run stress    # real MCP child processes against a local fake API
 npm run dev       # rebuild on save
 ```
 
 The tests run the real MCP server against a fake monday.com API over an
 in-memory transport. They assert the exact JSON that goes over the wire.
+See [test instructions and recorded local results](docs/testing.md) for the
+multi-process stress and real-browser fixtures.
 `test/regressions.test.ts` holds one test per defect found so far, named
 after the behaviour that was wrong.
 
-**Two CDP clients exist, on purpose.** `scripts/cdp-desktop.mjs` is the standalone
-CLI documented in [Mode 1](#mode-1--the-desktop-app-over-cdp-no-api-token).
-`src/desktop.ts` is its in-package twin, used by `monday_open` and
-`monday_ui_action`. The logic is duplicated because `scripts/` is not in
-package.json `files`, so a published install cannot reach it. Change one and you
-almost certainly need to change the other.
+`scripts/cdp-desktop.mjs` imports the built desktop implementation used by the
+MCP tools, so discovery checks, locking, and deadlines share one code path.
+Run the build before using the CLI. Separate processes serialize access to the
+same desktop debug port with a shared lock; an abandoned lock fails closed.
+
+The real Chrome fixture is opt-in. Set `MONDAY_TEST_BROWSER_EXECUTABLE` to the
+absolute browser executable path before running `test/browser.test.ts`. It
+launches dedicated headless processes and intercepts page requests with
+synthetic fixtures. A skipped test is not browser verification.
 
 ---
 

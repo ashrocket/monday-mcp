@@ -36,7 +36,6 @@ const TTL_MS = 60_000;
 export class BoardSchemaCache {
   private readonly client: MondayClient;
   private readonly entries = new Map<string, { at: number; schema: BoardSchema }>();
-  private readonly itemBoards = new Map<string, { at: number; boardId: string }>();
   private readonly now: () => number;
 
   constructor(client: MondayClient, now: () => number = Date.now) {
@@ -83,30 +82,20 @@ export class BoardSchemaCache {
     return board;
   }
 
-  /** Finds which board holds an item. The answer never changes, so it stays. */
+  /** Resolve current membership: items may move between authorization checks. */
   async boardIdForItem(itemId: string | number): Promise<string> {
     const key = String(itemId);
-    // An item can be moved to another board, so this expires like the
-    // board schema rather than living for the whole process.
-    const known = this.itemBoards.get(key);
-    if (known && this.now() - known.at < TTL_MS) {
-      this.client.assertBoardAllowed(known.boardId);
-      return known.boardId;
-    }
-
     const data = await this.client.query<{
       items: { id: string; board: { id: string } | null }[];
     }>(GET_ITEM_BOARDS, { ids: [key] }, { label: `item ${key}` });
 
-    const boardId = data.items?.[0]?.board?.id;
+    const boardId = data.items?.find((item) => String(item.id) === key)?.board?.id;
     if (!boardId) {
       throw new MondayApiError(
         `Item ${key} does not exist, or this token cannot see it.`,
       );
     }
     this.client.assertBoardAllowed(boardId);
-    if (this.itemBoards.size > 500) this.itemBoards.clear();
-    this.itemBoards.set(key, { at: this.now(), boardId });
     return boardId;
   }
 
